@@ -1,4 +1,6 @@
-import { NextResponse, type NextRequest } from 'next/server.js';
+import { NextResponse, type NextRequest } from 'next/server';
+
+export const runtime = 'experimental-edge';
 
 export async function middleware(request: NextRequest) {
   const requestId =
