@@ -5,6 +5,7 @@ import { MessageSquare, Loader2, ChevronDown } from 'lucide-react';
 import CommentItem from './CommentItem';
 import CommentComposer from './CommentComposer';
 import { ListSkeleton } from '@/components/ui/Skeleton';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 /**
  * CommentThread — Full comment section for content detail pages.
@@ -34,6 +35,16 @@ export default function CommentThread({
   const [sort, setSort] = useState('top');
   const [replyingTo, setReplyingTo] = useState(null);
   const [showReplies, setShowReplies] = useState({});
+  const [currentUserId, setCurrentUserId] = useState(null);
+
+  // Viewer identity for owner-only actions (delete menu).
+  // Server re-verifies ownership — this only controls UI visibility.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+    supabase.auth.getUser().then(({ data }) => {
+      setCurrentUserId(data?.user?.id || null);
+    }).catch(() => {});
+  }, []);
 
   // Fetch comments
   const fetchComments = useCallback(async (isRefresh = false) => {
@@ -220,6 +231,7 @@ export default function CommentThread({
                   comment={comment}
                   onReply={handleReply}
                   onDelete={handleDelete}
+                  currentUserId={currentUserId}
                 />
 
                 {/* Reply button for showing replies */}
@@ -242,6 +254,7 @@ export default function CommentThread({
                         comment={reply}
                         isReply
                         onDelete={handleDelete}
+                        currentUserId={currentUserId}
                       />
                     ))}
                     <button

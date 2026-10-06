@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Send, Loader2, X } from 'lucide-react';
+import { Send, X } from 'lucide-react';
 import Avatar from '@/components/ui/Avatar';
 import { getParticipantId } from '@/components/feed/ReactionBar';
 
@@ -146,14 +146,15 @@ export default function CommentComposer({
               <button
                 onClick={handleSubmit}
                 disabled={!text.trim() || isSubmitting}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ff4d00] hover:bg-[#ff6622] text-black text-[11px] font-mono font-bold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-busy={isSubmitting}
+                className="btn-burn tactile flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span className="spinner w-3 h-3" aria-hidden />
                 ) : (
                   <Send className="w-3 h-3" />
                 )}
-                Post
+                {isSubmitting ? 'Posting' : 'Post'}
               </button>
             </div>
           </div>

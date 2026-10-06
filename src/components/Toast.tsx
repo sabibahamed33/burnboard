@@ -15,7 +15,7 @@ interface ToastProps {
 
 export const ToastContainer: React.FC<ToastProps> = ({ toasts, onDismiss }) => {
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+    <div className="toast-stack" role="status" aria-live="polite" aria-atomic="false">
       {toasts.map(t => (
         <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
       ))}
@@ -58,7 +58,7 @@ const ToastItem: React.FC<{ toast: ToastMessage; onDismiss: (id: string) => void
       default:
         return {
           border: 'border-[#ff4d00]/50 bg-[#1a0e08]',
-          icon: <Flame className="w-5 h-5 text-[#ff4d00] shrink-0 animate-bounce" />,
+          icon: <Flame className="w-5 h-5 text-[#ff4d00] shrink-0 fire-pop" />,
           titleColor: 'text-[#ff7a3d]'
         };
     }
@@ -69,7 +69,7 @@ const ToastItem: React.FC<{ toast: ToastMessage; onDismiss: (id: string) => void
   return (
     <div
       id={`toast-${toast.id}`}
-      className={`pointer-events-auto flex items-start gap-3 p-3.5 rounded-xl border shadow-2xl backdrop-blur-md transition-all duration-200 animate-in fade-in slide-in-from-bottom-3 ${style.border}`}
+      className={`glass-strong toast-in pointer-events-auto flex items-start gap-3 p-3.5 rounded-2xl ${style.border}`}
     >
       <div className="pt-0.5">{style.icon}</div>
       <div className="flex-1 min-w-0">

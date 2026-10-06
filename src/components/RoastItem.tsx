@@ -108,7 +108,7 @@ export const RoastItem: React.FC<RoastItemProps> = ({
   return (
     <div
       id={`roast-item-${roast.id}`}
-      className="bg-[#0a0a0a] border border-[#222] hover:border-[#333] p-4 rounded-2xl transition-all duration-200 group relative shadow-md hover:shadow-xl"
+      className="glass glass-interactive bb-card group relative p-4"
     >
       {/* Top Header: Anon ID & Timestamp */}
       <div className="flex items-center justify-between mb-2">

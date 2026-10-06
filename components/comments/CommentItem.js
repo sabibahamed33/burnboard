@@ -31,7 +31,10 @@ export default function CommentItem({
   onDelete,
   isReply = false,
   className = '',
+  currentUserId = null,
 }) {
+  const canDelete = Boolean(comment.user_id && currentUserId && comment.user_id === currentUserId);
+  const [deleteError, setDeleteError] = useState('');
   const [showMenu, setShowMenu] = useState(false);
   const [reactionCounts, setReactionCounts] = useState(comment.reactionCounts || {});
   const [participantReaction, setParticipantReaction] = useState(null);
@@ -62,6 +65,7 @@ export default function CommentItem({
   const handleDelete = useCallback(async () => {
     if (!confirm('Delete this comment?')) return;
 
+    setDeleteError('');
     try {
       const res = await fetch(`/api/comments/${comment.id}`, {
         method: 'DELETE',
@@ -72,8 +76,12 @@ export default function CommentItem({
       if (res.ok) {
         onDelete?.(comment.id);
         track('comment_deleted', { commentId: comment.id });
+      } else {
+        setDeleteError('Could not delete. Please try again.');
       }
-    } catch {}
+    } catch {
+      setDeleteError('Could not delete. Please try again.');
+    }
     setShowMenu(false);
   }, [comment.id, onDelete]);
 
@@ -144,14 +152,15 @@ export default function CommentItem({
           </div>
         </div>
 
-        {/* Menu */}
+        {/* Menu — owners only (verified server-side too) */}
+        {canDelete && (
         <div className="relative shrink-0">
           <button
             onClick={() => setShowMenu(!showMenu)}
             className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-[#1a1a1a] transition-all text-zinc-500 hover:text-white"
             aria-label="More options"
           >
-            <MoreHorizontal className="w-3.5 h-3.5" />
+            <MoreHorizontal className="w-3 h-3" />
           </button>
           {showMenu && (
             <div className="absolute right-0 top-full mt-1 w-36 bg-[#1a1a1a] border border-[#333] rounded-xl shadow-2xl z-10 overflow-hidden">
@@ -164,7 +173,11 @@ export default function CommentItem({
               </button>
             </div>
           )}
+          {deleteError && (
+            <p role="alert" className="text-[10px] font-mono text-red-400 mt-1">{deleteError}</p>
+          )}
         </div>
+        )}
       </div>
     </div>
   );

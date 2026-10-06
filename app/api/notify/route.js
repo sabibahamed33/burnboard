@@ -103,6 +103,7 @@ export async function POST(req) {
       subscribersNotified: subscribers.length
     });
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Notification failure' }, { status: 500 });
+    console.error('[Notify] Error:', err?.message || err);
+    return NextResponse.json({ error: 'Notification failure' }, { status: 500 });
   }
 }

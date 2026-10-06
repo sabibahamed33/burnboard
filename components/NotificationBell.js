@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Bell, Check, CheckCheck, X, Flame, Trophy, Swords, Sparkles } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { subscribeRealtime } from '@/lib/realtime';
 
 // ── Notification Type Config ─────────────────────────────────
 const TYPE_CONFIG = {
@@ -82,7 +83,7 @@ function NotificationItem({ notification, onRead, onClose }) {
         {/* Unread Dot */}
         {isUnread && (
           <div className="shrink-0 mt-1">
-            <div className="w-2 h-2 rounded-full bg-[#ff4d00] animate-pulse" />
+            <div className="notif-dot w-2 h-2 rounded-full bg-[#ff4d00]" />
           </div>
         )}
       </div>
@@ -99,6 +100,12 @@ export default function NotificationBell({ userId: propUserId }) {
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const panelRef = useRef(null);
+  // Track dropdown state in a ref so the realtime effect below does NOT
+  // re-subscribe every time the panel opens/closes. Re-creating a channel
+  // with the same name threw "cannot add 'postgres_changes' callbacks ...
+  // after 'subscribe()'" and crashed the whole page via the error boundary.
+  const isOpenRef = useRef(isOpen);
+  useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
 
   // Auto-detect userId from Supabase auth if not provided
   useEffect(() => {
@@ -171,32 +178,36 @@ export default function NotificationBell({ userId: propUserId }) {
   }, [fetchUnreadCount]);
 
   // ── Realtime subscription for new notifications ──────────
+  // NOTE: deps are intentionally ONLY [userId] (+stable fetchNotifications).
+  // `isOpen` is read via isOpenRef so toggling the dropdown never recreates
+  // the channel (recreating the same topic name after subscribe() throws and
+  // used to crash Home/Feed right after login). Realtime is best-effort —
+  // polling above is the fallback — so failures must never throw to React.
   useEffect(() => {
     if (!userId || !isSupabaseConfigured || !supabase) return;
 
-    const channel = supabase
-      .channel(`notifications-${userId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
-        () => {
-          setUnreadCount(prev => prev + 1);
-          if (isOpen) fetchNotifications();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
-        () => {
-          if (isOpen) fetchNotifications();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId, isOpen, fetchNotifications]);
+    return subscribeRealtime(
+      supabase,
+      `notifications-${userId}`,
+      (ch) =>
+        ch
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+            () => {
+              setUnreadCount(prev => prev + 1);
+              if (isOpenRef.current) fetchNotifications();
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+            () => {
+              if (isOpenRef.current) fetchNotifications();
+            }
+          )
+    );
+  }, [userId, fetchNotifications]);
 
   // ── Click outside to close ───────────────────────────────
   useEffect(() => {
@@ -265,7 +276,7 @@ export default function NotificationBell({ userId: propUserId }) {
       >
         <Bell className="w-5 h-5 text-zinc-400 hover:text-white transition-colors" />
         {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-[#ff4d00] text-black text-[10px] font-mono font-black rounded-full px-1 shadow-[0_0_8px_rgba(255,77,0,0.5)]">
+          <span key={unreadCount} className="badge-pop absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-[#ff4d00] text-black text-[10px] font-mono font-black rounded-full px-1 shadow-[0_0_8px_rgba(255,77,0,0.5)]">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
@@ -273,7 +284,7 @@ export default function NotificationBell({ userId: propUserId }) {
 
       {/* Dropdown Panel */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-80 max-h-[70vh] bg-[#111] border border-[#222] rounded-2xl shadow-2xl overflow-hidden z-50">
+        <div className="glass-strong anim-modal-in absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] rounded-2xl overflow-hidden z-50">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-[#222]">
             <div className="flex items-center gap-2">
@@ -309,11 +320,11 @@ export default function NotificationBell({ userId: propUserId }) {
             {loading && !hasLoaded ? (
               <div className="space-y-2 p-2">
                 {[...Array(3)].map((_, i) => (
-                  <div key={i} className="animate-pulse flex items-start gap-3 p-3 rounded-xl">
-                    <div className="w-6 h-6 rounded-full bg-[#222]" />
+                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl">
+                    <div className="glass-skeleton w-6 h-6 rounded-full" />
                     <div className="flex-1 space-y-2">
-                      <div className="w-3/4 h-3 bg-[#222] rounded" />
-                      <div className="w-1/2 h-2 bg-[#1a1a1a] rounded" />
+                      <div className="glass-skeleton w-3/4 h-3" />
+                      <div className="glass-skeleton w-1/2 h-2" />
                     </div>
                   </div>
                 ))}

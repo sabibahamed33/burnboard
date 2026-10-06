@@ -44,7 +44,6 @@ export async function GET(request) {
         status: error ? 'degraded' : 'ok',
         latencyMs: Date.now() - dbStart,
         configured: true,
-        error: error?.message || null,
       };
     } else {
       checks.database = {
@@ -53,10 +52,10 @@ export async function GET(request) {
       };
     }
   } catch (err) {
+    console.error('[Health] Database check failed:', err?.message || err);
     checks.database = {
       status: 'error',
       configured: isSupabaseConfigured,
-      error: err.message,
     };
   }
   
@@ -68,9 +67,9 @@ export async function GET(request) {
       ...cacheStats,
     };
   } catch (err) {
+    console.error('[Health] Cache check failed:', err?.message || err);
     checks.cache = {
       status: 'error',
-      error: err.message,
     };
   }
   
@@ -82,9 +81,9 @@ export async function GET(request) {
       ...rlStats,
     };
   } catch (err) {
+    console.error('[Health] Rate limiter check failed:', err?.message || err);
     checks.rateLimiter = {
       status: 'error',
-      error: err.message,
     };
   }
   

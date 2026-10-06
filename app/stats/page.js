@@ -48,8 +48,8 @@ export default function StatsPage() {
           if (json.configured === false) setError('Stats are not configured yet.');
         }
       })
-      .catch((err) => {
-        if (!cancelled) setError(err?.message || 'Failed to load stats');
+      .catch(() => {
+        if (!cancelled) setError("Couldn't load stats. Please try again.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

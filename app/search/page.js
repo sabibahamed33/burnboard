@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Flame, Search, ArrowLeft, ArrowBigUp, MessageSquare } from 'lucide-react';
 import useSWR from 'swr';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { useDebouncedValue } from '@/lib/motion';
 import Avatar from '@/components/ui/Avatar';
 import { CommunityCard } from '@/components/communities';
 
@@ -46,6 +47,7 @@ const fetchAllProfiles = async () => {
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(query, 300);
 
   const { data: profiles = [], isLoading } = useSWR(
     isSupabaseConfigured ? 'search-profiles' : null,
@@ -60,8 +62,8 @@ export default function SearchPage() {
   };
 
   const { data: communityData } = useSWR(
-    query.trim() ? ['search-communities', query] : null,
-    () => fetchCommunities(query),
+    debouncedQuery.trim() ? ['search-communities', debouncedQuery] : null,
+    () => fetchCommunities(debouncedQuery),
     { revalidateOnFocus: false }
   );
 

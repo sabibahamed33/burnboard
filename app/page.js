@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import useSWR from 'swr';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { subscribeRealtime } from '@/lib/realtime';
 import { ProfileCardSkeleton, RoastItemSkeleton } from '@/components/Skeleton';
 import LiveStats from '@/components/LiveStats';
 import FriendChallenge from '@/components/FriendChallenge';
@@ -92,7 +93,7 @@ function RoastItem({ roast, targetUsername, targetPlatform, onUpvote, onReact, o
   };
 
   return (
-    <div className="bg-[#0a0a0a] border border-[#222] hover:border-[#333] p-4 rounded-2xl transition-all duration-200 group relative">
+    <div className="glass glass-interactive bb-card group relative p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-[#ff4d00] font-black font-mono flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-[#ff4d00]" />
@@ -129,11 +130,13 @@ function RoastItem({ roast, targetUsername, targetPlatform, onUpvote, onReact, o
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-[#1a1a1a]">
         <button
           onClick={handleUpvote}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-black transition-all duration-150 active:scale-90 ${
+          aria-pressed={!!roast.userUpvoted}
+          aria-label={`Upvote roast, ${roast.upvotes || 0} upvotes`}
+          className={`fire-btn tactile flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-black ${
             roast.userUpvoted
-              ? 'bg-[#ff4d00] text-black border-[#ff4d00] shadow-[0_0_12px_rgba(255,77,0,0.4)]'
+              ? 'bg-[#ff4d00] text-black border-[#ff4d00] fire-glow'
               : 'bg-[#141414] text-zinc-400 border-[#262626] hover:text-white hover:border-[#3a3a3a]'
-          } ${upvoting ? 'scale-110 -translate-y-0.5' : ''}`}
+          } ${upvoting ? 'fire-pop' : ''}`}
         >
           <ArrowBigUp className={`w-4 h-4 ${roast.userUpvoted ? 'fill-black text-black' : 'text-zinc-400'}`} />
           <span>{formatCount(roast.upvotes || 0)}</span>
@@ -314,28 +317,33 @@ export default function HomePage() {
     }
   };
 
-  // Realtime: subscribe to INSERT + UPDATE on roasts & profiles
+  // Realtime: subscribe to INSERT + UPDATE on roasts & profiles.
+  // Best-effort only (SWR polling above is the fallback) — must never throw
+  // into React, otherwise the Next.js error boundary takes down the page.
+  // Channel names are unique per mount (see lib/realtime) so StrictMode
+  // double-mounts or multiple instances can never collide on one topic.
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
 
-    const channel = supabase
-      .channel('feed-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'roasts' }, () => {
-        mutateRoasts();
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'roasts' }, () => {
-        mutateRoasts();
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
-        // Refresh first page when new profile added
-        setPage(0);
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, () => {
-        mutateRoasts(); // refresh counts
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    return subscribeRealtime(
+      supabase,
+      'feed-realtime',
+      (ch) =>
+        ch
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'roasts' }, () => {
+            mutateRoasts();
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'roasts' }, () => {
+            mutateRoasts();
+          })
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
+            // Refresh first page when new profile added
+            setPage(0);
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, () => {
+            mutateRoasts(); // refresh counts
+          })
+    );
   }, [mutateRoasts]);
 
   // Track landing view for activation analytics
@@ -350,20 +358,24 @@ export default function HomePage() {
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // ── Optimistic Upvote ──────────────────────────────────────
+  // ── Optimistic Upvote (rollback on failure) ──────────────
   const handleUpvote = async (roast) => {
+    const prevProfiles = allProfiles;
     setAllProfiles(prev => prev.map(p =>
       p.id === roast.profile_id ? { ...p, total_upvotes: (p.total_upvotes || 0) + 1 } : p
     ));
 
     try {
-      await supabase.from('roasts').update({ upvotes: (roast.upvotes || 0) + 1 }).eq('id', roast.id);
+      const { error } = await supabase.from('roasts').update({ upvotes: (roast.upvotes || 0) + 1 }).eq('id', roast.id);
+      if (error) throw error;
       const { data: profile } = await supabase.from('profiles').select('total_upvotes').eq('id', roast.profile_id).single();
       if (profile) {
         await supabase.from('profiles').update({ total_upvotes: (profile.total_upvotes || 0) + 1 }).eq('id', roast.profile_id);
       }
     } catch (err) {
       console.error('[Upvote] Failed:', err);
+      setAllProfiles(prevProfiles);
+      showToast('Upvote failed — try again');
     }
   };
 
@@ -458,8 +470,8 @@ export default function HomePage() {
             <ProfileCardSkeleton />
             <ProfileCardSkeleton />
           </div>
-          <div className="text-center py-4">
-            <p className="text-xs font-mono text-zinc-500 animate-pulse">🔥 Loading burns from Supabase...</p>
+          <div className="text-center py-4" role="status" aria-label="Loading feed">
+            <p className="type-micro animate-pulse">Loading...</p>
           </div>
         </div>
       </div>
@@ -480,9 +492,9 @@ export default function HomePage() {
           </header>
           <div className="bg-[#111] border border-dashed border-[#333] rounded-2xl p-10 text-center space-y-4">
             <div className="text-4xl">🔥</div>
-            <h2 className="text-lg font-bold text-white uppercase">Supabase Not Configured</h2>
+            <h2 className="text-lg font-bold text-white uppercase">Service Temporarily Unavailable</h2>
             <p className="text-xs text-zinc-400 max-w-md mx-auto">
-              Connect your Supabase project to start roasting. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to your environment.
+              We&apos;re having trouble connecting right now. Please check back soon.
             </p>
           </div>
         </div>
@@ -573,11 +585,11 @@ export default function HomePage() {
 
         {/* Feed Cards */}
         <div className="space-y-6">
-          {filteredProfiles.map((profile) => {
+          {filteredProfiles.map((profile, idx) => {
             const profileRoasts = roasts.filter(r => r.profile_id === profile.id);
             return (
+              <div key={profile.id} className="feed-enter content-swap" style={{ '--stagger': Math.min(idx, 7) }}>
               <ProfileCard
-                key={profile.id}
                 profile={profile}
                 roasts={profileRoasts}
                 onUpvote={handleUpvote}
@@ -585,6 +597,7 @@ export default function HomePage() {
                 onShare={handleShare}
                 onReport={handleReport}
               />
+              </div>
             );
           })}
 

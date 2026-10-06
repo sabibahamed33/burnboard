@@ -80,7 +80,8 @@ export default function UserProfilePage() {
 
     const fetchProfile = async () => {
       if (!isSupabaseConfigured || !supabase) {
-        setError('Supabase not configured');
+        console.error('[Profile] Backend not configured');
+        setError('Profile service is temporarily unavailable. Please try again later.');
         setLoading(false);
         return;
       }

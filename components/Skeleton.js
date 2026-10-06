@@ -2,20 +2,20 @@ import React from 'react';
 
 export function ProfileCardSkeleton() {
   return (
-    <div className="bg-[#111] border border-[#222] rounded-2xl p-5 space-y-4 animate-pulse">
+    <div className="glass-soft rounded-2xl p-5 space-y-4" aria-busy="true" aria-label="Loading profile">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-[#222]" />
+          <div className="glass-skeleton h-12 w-12 rounded-full" />
           <div className="space-y-2">
-            <div className="w-32 h-4 bg-[#222] rounded" />
-            <div className="w-20 h-3 bg-[#1a1a1a] rounded" />
+            <div className="glass-skeleton h-4 w-32" />
+            <div className="glass-skeleton h-3 w-20" />
           </div>
         </div>
-        <div className="w-16 h-6 bg-[#222] rounded-lg" />
+        <div className="glass-skeleton h-6 w-16 rounded-lg" />
       </div>
       <div className="space-y-1.5 pt-1">
-        <div className="w-full h-3 bg-[#1e1e1e] rounded" />
-        <div className="w-4/5 h-3 bg-[#1e1e1e] rounded" />
+        <div className="glass-skeleton h-3 w-full" />
+        <div className="glass-skeleton h-3 w-4/5" />
       </div>
     </div>
   );
@@ -23,13 +23,23 @@ export function ProfileCardSkeleton() {
 
 export function RoastItemSkeleton() {
   return (
-    <div className="p-4 bg-[#111] border border-[#222] rounded-2xl space-y-3 animate-pulse">
+    <div className="glass-soft rounded-2xl p-4 space-y-3" aria-busy="true" aria-label="Loading roast">
       <div className="flex items-center justify-between">
-        <div className="w-24 h-4 bg-[#222] rounded" />
-        <div className="w-16 h-3 bg-[#1a1a1a] rounded" />
+        <div className="glass-skeleton h-4 w-24" />
+        <div className="glass-skeleton h-3 w-16" />
       </div>
-      <div className="w-full h-4 bg-[#1e1e1e] rounded" />
-      <div className="w-2/3 h-4 bg-[#1e1e1e] rounded" />
+      <div className="glass-skeleton h-4 w-full" />
+      <div className="glass-skeleton h-4 w-2/3" />
+    </div>
+  );
+}
+
+export function GlassCardSkeleton({ lines = 3, className = '' }) {
+  return (
+    <div className={`glass-soft rounded-2xl p-4 space-y-2.5 ${className}`} aria-busy="true" aria-label="Loading content">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className="glass-skeleton h-3.5" style={{ width: `${100 - i * 14}%` }} />
+      ))}
     </div>
   );
 }

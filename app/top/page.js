@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { subscribeRealtime } from '@/lib/realtime';
 import { ProfileCardSkeleton } from '@/components/Skeleton';
 import LiveStats from '@/components/LiveStats';
 import {
@@ -72,24 +73,25 @@ export default function TopPage() {
     fetchTopProfiles();
   }, [fetchTopProfiles]);
 
-  // Realtime: subscribe to profile UPDATEs for live reorder
+  // Realtime: subscribe to profile UPDATEs for live reorder (best-effort).
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
 
-    const channel = supabase
-      .channel('top-board-realtime')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, () => {
-        fetchTopProfiles();
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
-        fetchTopProfiles();
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'profiles' }, () => {
-        fetchTopProfiles();
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    return subscribeRealtime(
+      supabase,
+      'top-board-realtime',
+      (ch) =>
+        ch
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, () => {
+            fetchTopProfiles();
+          })
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
+            fetchTopProfiles();
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'profiles' }, () => {
+            fetchTopProfiles();
+          })
+    );
   }, [fetchTopProfiles]);
 
   // ── Loading Skeleton ───────────────────────────────────────
@@ -126,8 +128,8 @@ export default function TopPage() {
           </header>
           <div className="bg-[#111] border border-dashed border-[#333] rounded-2xl p-10 text-center space-y-4">
             <div className="text-4xl">🏆</div>
-            <h2 className="text-lg font-bold text-white uppercase">Supabase Not Configured</h2>
-            <p className="text-xs text-zinc-400">Connect Supabase to see the live leaderboard.</p>
+            <h2 className="text-lg font-bold text-white uppercase">Leaderboard Unavailable</h2>
+            <p className="text-xs text-zinc-400">Rankings can&apos;t be loaded right now. Please try again later.</p>
           </div>
         </div>
       </div>
@@ -143,7 +145,7 @@ export default function TopPage() {
             <Trophy className="w-8 h-8 text-[#ff4d00]" />
             <h1 className="text-2xl font-black uppercase tracking-wider font-mono">Leaderboard</h1>
           </div>
-          <p className="text-xs text-zinc-400 font-mono">Top 10 most roasted targets. Live from Supabase.</p>
+          <p className="text-xs text-zinc-400 font-mono">Top 10 most roasted targets. Updated live.</p>
           <div className="flex justify-center">
             <LiveStats />
           </div>

@@ -88,7 +88,7 @@ async function getHandler(req) {
 
     if (error) {
       console.error('[Comments] GET Error:', error);
-      return NextResponse.json({ comments: [], hasMore: false, error: error.message });
+      return NextResponse.json({ comments: [], hasMore: false, error: 'Unable to load comments right now.' });
     }
 
     const hasMore = comments.length > limit;

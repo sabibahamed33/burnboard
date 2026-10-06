@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { subscribeRealtime } from '@/lib/realtime';
 import { Flame, ArrowLeft, ArrowBigUp, Share2, Copy, Check, MessageCircle, Send, ExternalLink, Sparkles, Clock } from 'lucide-react';
 
 function timeAgo(dateString) {
@@ -89,24 +90,25 @@ export default function PostClient({ profile, initialRoasts }) {
   const shareUrl = typeof window !== 'undefined' ? window.location.href : `https://burnboard.app/post/${profile.id}`;
   const shareText = `@${profile.username} is getting roasted on BURNBOARD 🔥`;
 
-  // Realtime subscription
+  // Realtime subscription (best-effort — failures must never crash the page)
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
 
-    const channel = supabase
-      .channel(`post-${profile.id}-realtime`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'roasts', filter: `profile_id=eq.${profile.id}` }, (payload) => {
-        setRoasts(prev => [payload.new, ...prev]);
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'roasts' }, (payload) => {
-        setRoasts(prev => prev.map(r => r.id === payload.new?.id ? payload.new : r));
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'roasts' }, (payload) => {
-        setRoasts(prev => prev.filter(r => r.id !== payload.old?.id));
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    return subscribeRealtime(
+      supabase,
+      `post-${profile.id}-realtime`,
+      (ch) =>
+        ch
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'roasts', filter: `profile_id=eq.${profile.id}` }, (payload) => {
+            setRoasts(prev => [payload.new, ...prev]);
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'roasts' }, (payload) => {
+            setRoasts(prev => prev.map(r => r.id === payload.new?.id ? payload.new : r));
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'roasts' }, (payload) => {
+            setRoasts(prev => prev.filter(r => r.id !== payload.old?.id));
+          })
+    );
   }, [profile.id]);
 
   // Optimistic upvote

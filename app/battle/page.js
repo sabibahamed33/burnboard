@@ -7,6 +7,7 @@ import {
   Swords, Flame, RefreshCw, Loader2, Share2, Check
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { subscribeRealtime } from '@/lib/realtime';
 import { getOrCreateAnonId } from '@/src/lib/presence';
 import LiveStats from '@/components/LiveStats';
 import { track } from '@/lib/analytics';
@@ -105,24 +106,24 @@ export default function BattlePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Realtime: live totals from the canonical battles row ─────
+  // ── Realtime: live totals from the canonical battles row (best-effort) ─────
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase || !battleId) return;
 
-    const channel = supabase
-      .channel(`battle-${battleId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'battles', filter: `id=eq.${battleId}` },
-        (payload) => {
-          const next = payload.new;
-          if (typeof next.votes1 === 'number') setVotes1(next.votes1);
-          if (typeof next.votes2 === 'number') setVotes2(next.votes2);
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    return subscribeRealtime(
+      supabase,
+      `battle-${battleId}`,
+      (ch) =>
+        ch.on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'battles', filter: `id=eq.${battleId}` },
+          (payload) => {
+            const next = payload.new;
+            if (typeof next.votes1 === 'number') setVotes1(next.votes1);
+            if (typeof next.votes2 === 'number') setVotes2(next.votes2);
+          }
+        )
+    );
   }, [battleId]);
 
   // ── Vote (server-controlled; switching allowed while open) ──

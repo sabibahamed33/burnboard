@@ -48,9 +48,15 @@ export async function DELETE(req, { params }) {
     const { data: { user } } = await supabase.auth.getUser();
     const isOwner = comment.user_id && user && comment.user_id === user.id;
 
-    // For anonymous comments, we can't verify ownership via auth
-    // In production, you'd want a more robust ownership model
-    if (!isOwner && comment.user_id) {
+    // Anonymous comments carry no verifiable owner identity (no user_id and
+    // no stored participant fingerprint), so they cannot be deleted through
+    // this endpoint. This closes mass-deletion abuse where anyone could
+    // remove anyone else's anonymous comments.
+    if (!comment.user_id) {
+      return NextResponse.json({ error: 'You can only delete your own comments' }, { status: 403 });
+    }
+
+    if (!isOwner) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 

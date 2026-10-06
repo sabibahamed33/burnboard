@@ -79,12 +79,12 @@ export default function SocialShell({ children }) {
 
   return (
     <div className="social-shell">
-      {/* ═══ Desktop Sidebar ═══ */}
-      <aside className="hidden lg:flex fixed left-0 top-0 bottom-0 w-[260px] bg-[#0a0a0a] border-r border-[#1a1a1a] flex-col z-40">
+      {/* ═══ Desktop Sidebar — floating glass control layer ═══ */}
+      <aside className="hidden lg:flex fixed left-4 top-4 bottom-4 w-[260px] glass-nav rounded-3xl flex-col z-40 overflow-hidden" aria-label="Primary">
         {/* Logo */}
-        <div className="p-5 border-b border-[#1a1a1a]">
+        <div className="p-5 border-b border-white/[0.06]">
           <Link href="/" className="flex items-center gap-2.5 group">
-            <div className="w-9 h-9 rounded-xl bg-[#ff4d00] flex items-center justify-center shadow-[0_0_15px_rgba(255,77,0,0.3)] group-hover:shadow-[0_0_20px_rgba(255,77,0,0.5)] transition-shadow">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-b from-[#ff6a1f] to-[#ff4d00] flex items-center justify-center shadow-[0_0_18px_rgba(255,77,0,0.45)] group-hover:shadow-[0_0_26px_rgba(255,77,0,0.6)] transition-shadow">
               <Flame className="w-5 h-5 text-black fill-black" />
             </div>
             <div>
@@ -95,7 +95,7 @@ export default function SocialShell({ children }) {
         </div>
 
         {/* Primary Nav */}
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map(item => {
             const Icon = item.icon;
             const active = isActive(item.href);
@@ -103,22 +103,24 @@ export default function SocialShell({ children }) {
               <Link
                 key={item.key}
                 href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                aria-current={active ? 'page' : undefined}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm font-bold transition-all min-h-[44px] ${
                   item.accent
-                    ? 'bg-[#ff4d00] text-black hover:bg-[#ff6622] shadow-[0_0_12px_rgba(255,77,0,0.3)] mt-3'
+                    ? 'btn-burn mt-3'
                     : active
-                      ? 'bg-[#111] text-white border border-[#222]'
-                      : 'text-zinc-400 hover:text-white hover:bg-[#111]'
+                      ? 'glass glass-active text-white'
+                      : 'text-zinc-400 hover:text-white hover:bg-white/[0.05]'
                 }`}
               >
                 <Icon className={`w-5 h-5 ${item.accent ? 'text-black' : active ? 'text-[#ff4d00]' : ''}`} />
                 <span className="font-mono">{item.label}</span>
+                {active && !item.accent ? <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[#ff4d00] shadow-[0_0_8px_rgba(255,77,0,0.9)]" aria-hidden /> : null}
               </Link>
             );
           })}
 
           {/* Divider */}
-          <div className="h-px bg-[#1a1a1a] my-3" />
+          <div className="h-px bg-white/[0.06] my-3" />
 
           {/* Secondary Nav */}
           {secondaryItems.map(item => {
@@ -128,13 +130,14 @@ export default function SocialShell({ children }) {
               <Link
                 key={item.key}
                 href={item.href}
-                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-mono transition-all ${
+                aria-current={active ? 'page' : undefined}
+                className={`flex items-center gap-3 px-3 py-2 rounded-2xl text-xs font-mono transition-all min-h-[44px] ${
                   active
-                    ? 'bg-[#111] text-white'
-                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-[#111]'
+                    ? 'glass glass-active text-white'
+                    : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05]'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className={`w-4 h-4 ${active ? 'text-[#ff4d00]' : ''}`} />
                 <span>{item.label}</span>
               </Link>
             );
@@ -142,13 +145,13 @@ export default function SocialShell({ children }) {
         </nav>
 
         {/* User Section */}
-        <div className="p-3 border-t border-[#1a1a1a]">
+        <div className="p-3 border-t border-white/[0.06]">
           {user ? (
             <Link
               href={`/u/${user.email?.split('@')[0] || 'user'}`}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#111] transition-all"
+              className="glass-soft flex items-center gap-3 px-3 py-2.5 rounded-2xl hover:border-[#ff4d00]/40 transition-all"
             >
-              <div className="w-8 h-8 rounded-full bg-[#ff4d00] flex items-center justify-center text-xs font-black text-black">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#ff4d00] to-amber-400 flex items-center justify-center text-xs font-black text-black">
                 {user.email?.[0]?.toUpperCase() || '?'}
               </div>
               <div className="flex-1 min-w-0">
@@ -160,7 +163,7 @@ export default function SocialShell({ children }) {
           ) : (
             <Link
               href="/auth"
-              className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#111] border border-[#222] hover:border-[#ff4d00]/50 text-xs font-mono font-bold text-zinc-300 hover:text-white transition-all"
+              className="btn-glass flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl text-xs font-mono font-bold text-zinc-200 hover:text-white transition-all"
             >
               <User className="w-4 h-4" />
               Sign In
@@ -169,9 +172,9 @@ export default function SocialShell({ children }) {
         </div>
       </aside>
 
-      {/* ═══ Mobile Bottom Nav ═══ */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-lg border-t border-[#1a1a1a] pb-safe">
-        <div className="flex items-center justify-around px-2 py-1">
+      {/* ═══ Mobile Bottom Nav — floating glass pill ═══ */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 px-3 pb-safe" aria-label="Primary mobile">
+        <div className="glass-nav mx-auto mb-3 flex max-w-md items-center justify-around rounded-3xl px-2 py-1.5" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
           {NAV_ITEMS.slice(0, 5).map(item => {
             const Icon = item.icon;
             const active = isActive(item.href);
@@ -179,22 +182,27 @@ export default function SocialShell({ children }) {
               <Link
                 key={item.key}
                 href={item.href}
-                className={`flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[56px] ${
+                aria-current={active ? 'page' : undefined}
+                aria-label={item.label}
+                className={`tactile flex flex-col items-center gap-0.5 px-3 py-2 rounded-2xl min-w-[56px] min-h-[52px] justify-center ${
                   item.accent
-                    ? '-mt-4'
-                    : ''
+                    ? '-mt-6'
+                    : active ? 'bg-[#ff4d00]/12' : ''
                 }`}
               >
                 {item.accent ? (
-                  <div className="w-10 h-10 rounded-full bg-[#ff4d00] flex items-center justify-center shadow-[0_0_15px_rgba(255,77,0,0.4)] -mb-1">
-                    <Icon className="w-5 h-5 text-black" />
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-b from-[#ff6a1f] to-[#ff4d00] flex items-center justify-center shadow-[0_0_22px_rgba(255,77,0,0.55)] -mb-1 pressable">
+                    <Icon className="w-6 h-6 text-black" strokeWidth={2.5} />
                   </div>
                 ) : (
-                  <Icon className={`w-5 h-5 ${active ? 'text-[#ff4d00]' : 'text-zinc-500'}`} />
+                  <span className={`flex h-8 w-12 items-center justify-center rounded-xl ${active ? 'glass glass-active' : ''}`}>
+                    <Icon className={`w-5 h-5 ${active ? 'text-[#ff4d00]' : 'text-zinc-500'}`} />
+                  </span>
                 )}
                 <span className={`text-[9px] font-mono font-bold ${item.accent ? 'text-[#ff4d00]' : active ? 'text-[#ff4d00]' : 'text-zinc-500'}`}>
                   {item.shortLabel}
                 </span>
+                {active && !item.accent ? <span className="h-1 w-1 rounded-full bg-[#ff4d00]" aria-hidden /> : null}
               </Link>
             );
           })}

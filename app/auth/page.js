@@ -34,6 +34,19 @@ export default function AuthPage() {
 
   const passwordStrength = getPasswordStrength(password);
 
+  // Map low-level transport failures ("Failed to fetch", DNS, offline) to a
+  // human-friendly message. Anything else passes through unchanged.
+  const friendlyAuthError = (err, fallback) => {
+    const msg = err?.message || '';
+    if (
+      typeof navigator !== 'undefined' && !navigator.onLine ||
+      /failed to fetch|fetch failed|network|load failed|timeout|abort/i.test(msg)
+    ) {
+      return 'Cannot reach the authentication server. Check your connection and try again.';
+    }
+    return msg || fallback || 'Authentication failed. Please try again.';
+  };
+
   // ── Post-signup continuation (Master Prompt 14) ────────────
   // Read the visitor's intended destination + optional referral from the URL
   // so a shared link → signup → original content loop keeps its context.
@@ -104,10 +117,12 @@ export default function AuthPage() {
           setUsernameSuggestion('');
         }
       } else {
-        setUsernameStatus('available');
+        // Backend unreachable/unconfigured: make no availability claim.
+        setUsernameStatus('idle');
       }
     } catch {
-      setUsernameStatus('available');
+      // Network/DB failure: make no availability claim (never fake "available").
+      setUsernameStatus('idle');
     }
   }, []);
 
@@ -119,7 +134,8 @@ export default function AuthPage() {
 
     try {
       if (!isSupabaseConfigured || !supabase) {
-        setError('Supabase not configured');
+        console.error('[Auth] Backend not configured');
+        setError('Authentication is temporarily unavailable. Please try again later.');
         setLoading(false);
         return;
       }
@@ -164,7 +180,7 @@ export default function AuthPage() {
         });
 
         if (signUpError) {
-          setError(signUpError.message);
+          setError(friendlyAuthError(signUpError, 'Sign-up failed. Please try again.'));
         } else if (data.user) {
           await supabase.from('user_profiles').insert({
             id: data.user.id,
@@ -182,7 +198,7 @@ export default function AuthPage() {
       } else {
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) {
-          setError(signInError.message);
+          setError(friendlyAuthError(signInError, 'Sign-in failed. Please try again.'));
         } else {
           // Real referral conversion on sign-in (idempotent, best-effort).
           fireAttribution({ next, ref, isSignup: false });
@@ -191,15 +207,15 @@ export default function AuthPage() {
         }
       }
     } catch (err) {
-      setError(err.message || 'Authentication failed');
+      setError(friendlyAuthError(err, 'Authentication failed'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white flex items-center justify-center p-4 font-mono">
-      <div className="w-full max-w-md space-y-6">
+    <div className="min-h-screen text-white flex items-center justify-center p-4 font-mono">
+      <div className="w-full max-w-md space-y-6 animate-slide-up">
         {/* Brand Header */}
         <div className="text-center space-y-3">
           <div className="flex items-center justify-center gap-2">
@@ -218,9 +234,9 @@ export default function AuthPage() {
         </div>
 
         {/* Auth Card */}
-        <div className="bg-[#111] border border-[#222] rounded-2xl p-6 space-y-5">
+        <div className="glass-strong rounded-3xl p-6 space-y-5 sm:p-7">
           {/* Tab Toggle */}
-          <div className="flex bg-[#0a0a0a] p-1 rounded-xl border border-[#262626]">
+          <div className="glass-soft flex p-1 rounded-2xl" role="tablist" aria-label="Authentication mode">
             <button
               onClick={() => { setMode('signup'); setError(''); setSuccess(''); }}
               className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${
@@ -369,9 +385,10 @@ export default function AuthPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-[#ff4d00] hover:bg-[#ff6622] text-black font-extrabold rounded-xl transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-wider shadow-[0_0_20px_rgba(255,77,0,0.4)] disabled:opacity-40"
+              aria-busy={loading}
+              className="btn-burn tactile w-full py-3 rounded-xl flex items-center justify-center gap-2 text-sm uppercase tracking-wider disabled:opacity-40"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
+              {loading ? <span className="spinner w-4 h-4" aria-hidden /> : (
                 <>
                   <Flame className="w-4 h-4 fill-black" />
                   <span>{mode === 'signup' ? 'Create Account' : 'Sign In'}</span>

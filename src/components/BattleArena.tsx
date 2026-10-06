@@ -56,6 +56,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
 
   const handleVote = (candidate: 1 | 2) => {
     if (!activeBattle || !profile1 || !profile2) return;
+    if (hasVoted !== null) return; // prevent double-tap duplicate votes
     setHasVoted(candidate);
 
     // Confetti blast
@@ -151,11 +152,11 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
           </div>
           <div className="h-3.5 bg-[#141414] rounded-full overflow-hidden flex border border-[#333] p-0.5">
             <div
-              className="bg-gradient-to-r from-orange-600 to-[#ff4d00] h-full rounded-l-full transition-all duration-500"
+              className="vote-bar bg-gradient-to-r from-orange-600 to-[#ff4d00] h-full rounded-l-full"
               style={{ width: `${pct1}%` }}
             />
             <div
-              className="bg-gradient-to-r from-blue-500 to-indigo-600 h-full rounded-r-full transition-all duration-500"
+              className="vote-bar bg-gradient-to-r from-blue-500 to-indigo-600 h-full rounded-r-full"
               style={{ width: `${pct2}%` }}
             />
           </div>
@@ -224,9 +225,11 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
               <button
                 id="btn-vote-candidate-1"
                 onClick={() => handleVote(1)}
-                className={`w-full py-3 rounded-xl font-mono font-black uppercase text-xs sm:text-sm tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                disabled={hasVoted !== null}
+                aria-pressed={hasVoted === 1}
+                className={`w-full py-3 rounded-xl font-mono font-black uppercase text-xs sm:text-sm tracking-wider flex items-center justify-center gap-2 tactile min-h-[44px] disabled:cursor-default ${
                   hasVoted === 1
-                    ? 'bg-[#ff4d00] text-black shadow-[0_0_20px_rgba(255,77,0,0.5)]'
+                    ? 'bg-[#ff4d00] text-black vote-selected fire-glow'
                     : 'bg-[#ff4d00]/20 hover:bg-[#ff4d00] text-[#ff4d00] hover:text-black border border-[#ff4d00]/40'
                 }`}
               >
@@ -295,9 +298,11 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
               <button
                 id="btn-vote-candidate-2"
                 onClick={() => handleVote(2)}
-                className={`w-full py-3 rounded-xl font-mono font-black uppercase text-xs sm:text-sm tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                disabled={hasVoted !== null}
+                aria-pressed={hasVoted === 2}
+                className={`w-full py-3 rounded-xl font-mono font-black uppercase text-xs sm:text-sm tracking-wider flex items-center justify-center gap-2 tactile min-h-[44px] disabled:cursor-default ${
                   hasVoted === 2
-                    ? 'bg-blue-500 text-black shadow-[0_0_20px_rgba(59,130,246,0.5)]'
+                    ? 'bg-blue-500 text-black vote-selected shadow-[0_0_20px_rgba(59,130,246,0.5)]'
                     : 'bg-blue-500/20 hover:bg-blue-500 text-blue-400 hover:text-black border border-blue-500/40'
                 }`}
               >

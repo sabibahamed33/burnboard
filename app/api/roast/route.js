@@ -143,7 +143,8 @@ async function postHandler(req) {
       }
     });
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    console.error('[Roast] Submission error:', err?.message || err);
+    return NextResponse.json({ error: 'Unable to submit your roast right now. Please try again.' }, { status: 500 });
   }
 }
 

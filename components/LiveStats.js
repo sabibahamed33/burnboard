@@ -9,6 +9,7 @@
 import React, { useState, useEffect } from 'react';
 import { Flame, Users } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { subscribeRealtime } from '@/lib/realtime';
 
 export default function LiveStats() {
   const [profileCount, setProfileCount] = useState(0);
@@ -25,46 +26,49 @@ export default function LiveStats() {
           supabase.from('roasts').select('id', { count: 'exact', head: true }),
         ]);
 
-        setProfileCount(profilesRes.count || 0);
-        setRoastCount(roastsRes.count || 0);
-        setConnected(true);
-      } catch (err) {
-        console.warn('[LiveStats] Failed to fetch counts:', err);
+        // A missing table / RLS denial surfaces as an error (or 404 in the
+        // network tab for head-count queries on fresh projects). That's fine —
+        // stats are decorative, so stay silent and keep the last good value.
+        if (!profilesRes.error) setProfileCount(profilesRes.count || 0);
+        if (!roastsRes.error) setRoastCount(roastsRes.count || 0);
+        if (!profilesRes.error && !roastsRes.error) setConnected(true);
+      } catch {
+        // Silent: stats must never break the page.
       }
     };
 
     fetchCounts();
 
-    // Realtime subscription for live count updates
-    const channel = supabase
-      .channel('live-stats')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'profiles' },
-        () => setProfileCount(prev => prev + 1)
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'roasts' },
-        () => setRoastCount(prev => prev + 1)
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'profiles' },
-        () => setProfileCount(prev => Math.max(0, prev - 1))
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'roasts' },
-        () => setRoastCount(prev => Math.max(0, prev - 1))
-      )
-      .subscribe((status) => {
+    // Realtime subscription for live count updates (best-effort, never throws).
+    return subscribeRealtime(
+      supabase,
+      'live-stats',
+      (ch) =>
+        ch
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'profiles' },
+            () => setProfileCount(prev => prev + 1)
+          )
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'roasts' },
+            () => setRoastCount(prev => prev + 1)
+          )
+          .on(
+            'postgres_changes',
+            { event: 'DELETE', schema: 'public', table: 'profiles' },
+            () => setProfileCount(prev => Math.max(0, prev - 1))
+          )
+          .on(
+            'postgres_changes',
+            { event: 'DELETE', schema: 'public', table: 'roasts' },
+            () => setRoastCount(prev => Math.max(0, prev - 1))
+          ),
+      (status) => {
         setConnected(status === 'SUBSCRIBED');
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+      }
+    );
   }, []);
 
   if (!isSupabaseConfigured || !supabase) return null;

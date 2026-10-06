@@ -14,8 +14,8 @@ import { t } from '@/lib/lang';
 export default function AppHeader({ showCreate = true, backLink, backLabel }) {
 
   return (
-    <header className="space-y-4 py-4 border-b border-[#222]">
-      <div className="flex items-center justify-between">
+    <header className="glass-nav sticky top-2 z-30 rounded-2xl px-3 py-2.5 sm:px-4">
+      <div className="flex items-center justify-between gap-2">
         {/* Left side: back link or BURN BOARD */}
         {backLink ? (
           <Link href={backLink} className="flex items-center gap-2 text-zinc-400 hover:text-white font-mono text-xs transition-colors">
@@ -34,7 +34,7 @@ export default function AppHeader({ showCreate = true, backLink, backLabel }) {
           <Link
             href="/invite"
             title="Invite friends & earn karma"
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 border border-[#26262c] hover:border-[#ff4d00]/50 text-zinc-400 hover:text-white text-[11px] font-mono rounded-xl transition-all"
+            className="btn-glass hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-mono rounded-xl transition-all"
           >
             <Gift className="w-3.5 h-3.5 text-[#ff4d00]" />
             Invite
@@ -44,7 +44,7 @@ export default function AppHeader({ showCreate = true, backLink, backLabel }) {
           {showCreate && (
             <Link
               href="/hot-seat"
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#ff4d00] hover:bg-[#ff6622] text-black font-bold text-[11px] rounded-xl transition-all shadow-[0_0_15px_rgba(255,77,0,0.3)]"
+              className="btn-burn inline-flex items-center gap-1.5 px-4 py-2 text-[11px] rounded-xl transition-all"
             >
               <Plus className="w-3.5 h-3.5" />
               {t('nav_create_hot_seat')}

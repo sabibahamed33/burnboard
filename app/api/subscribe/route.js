@@ -20,12 +20,17 @@ export async function POST(req) {
         .insert([{ profile_id, email: email.trim().toLowerCase() }]);
 
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        if (error.code === '23505') {
+          return NextResponse.json({ success: true, message: 'Already subscribed to profile alerts.' });
+        }
+        console.error('[Subscribe] Error:', error.message);
+        return NextResponse.json({ error: 'Unable to subscribe right now. Please try again.' }, { status: 500 });
       }
     }
 
     return NextResponse.json({ success: true, message: 'Subscribed to profile alerts.' });
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Subscription error' }, { status: 500 });
+    console.error('[Subscribe] Error:', err?.message || err);
+    return NextResponse.json({ error: 'Unable to subscribe right now. Please try again.' }, { status: 500 });
   }
 }

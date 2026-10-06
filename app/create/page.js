@@ -4,7 +4,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Flame, ArrowLeft, Loader2, Check, X, ImagePlus, Plus, Trash2,
+  Flame, ArrowLeft, Check, X, ImagePlus, Plus, Trash2,
   MessageCircle, HelpCircle, BarChart3, Camera, Zap, Users, Globe, ChevronDown
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
@@ -612,10 +612,11 @@ export default function CreatePage() {
           <button
             onClick={handlePublish}
             disabled={isSubmitting || text.trim().length < selectedType.minLength}
-            className="w-full py-3.5 bg-[#ff4d00] hover:bg-[#ff6622] text-black font-bold rounded-xl transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-wider shadow-[0_0_20px_rgba(255,77,0,0.4)] disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-busy={isSubmitting}
+            className="btn-burn tactile w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-sm uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isSubmitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="spinner w-4 h-4" aria-hidden />
             ) : (
               <>
                 <Flame className="w-4 h-4 fill-black" />

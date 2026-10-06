@@ -42,6 +42,7 @@ export async function POST(req) {
       duplicate: result.duplicate || false,
     });
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Report failed' }, { status: 500 });
+    console.error('[Report] Error:', err?.message || err);
+    return NextResponse.json({ error: 'Unable to submit your report right now. Please try again.' }, { status: 500 });
   }
 }

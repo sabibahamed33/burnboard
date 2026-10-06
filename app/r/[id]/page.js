@@ -69,8 +69,8 @@ export default async function RoastDetailPage({ params }) {
       <div className="min-h-screen bg-[#0a0a0a] text-white flex items-center justify-center p-4 font-mono">
         <div className="text-center space-y-4">
           <div className="text-4xl">🔥</div>
-          <h1 className="text-xl font-bold">Supabase Not Configured</h1>
-          <p className="text-xs text-zinc-400">Connect your Supabase project to view roasts.</p>
+          <h1 className="text-xl font-bold">Roast Unavailable</h1>
+          <p className="text-xs text-zinc-400">This roast can&apos;t be loaded right now. Please try again later.</p>
           <Link href="/" className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#ff4d00] text-black font-bold text-xs rounded-xl">
             ← Back to Feed
           </Link>

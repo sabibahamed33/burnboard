@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { subscribeRealtime } from '@/lib/realtime';
 import LiveStats from '@/components/LiveStats';
 import { Flame, TrendingUp, Clock, Skull, ArrowBigUp, Share2, Sparkles, Trophy } from 'lucide-react';
 
@@ -184,27 +185,34 @@ export default function PlatformFeed({ initialProfiles, platformKey, platformNam
     fetchRoasts();
   }, [profiles]);
 
-  // Realtime subscription
+  // Realtime subscription (best-effort). `profiles` is read via ref so that
+  // every fetched profile list does NOT recreate the channel — recreating the
+  // same topic after subscribe() throws and used to crash the page.
+  const profilesRef = useRef(profiles);
+  useEffect(() => { profilesRef.current = profiles; }, [profiles]);
+
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
-    const channel = supabase
-      .channel(`platform-${platformKey}-realtime`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
-        // Re-fetch platform profiles
-        supabase.from('profiles').select('*, roasts(*)').eq('platform', platformName).order('created_at', { ascending: false })
-          .then(({ data }) => { if (data) setProfiles(data); });
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'roasts' }, (payload) => {
-        if (profiles.some(p => p.id === payload.new?.profile_id)) {
-          setRoasts(prev => [payload.new, ...prev]);
-        }
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'roasts' }, (payload) => {
-        setRoasts(prev => prev.map(r => r.id === payload.new?.id ? payload.new : r));
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [platformKey, platformName, profiles]);
+    return subscribeRealtime(
+      supabase,
+      `platform-${platformKey}-realtime`,
+      (ch) =>
+        ch
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
+            // Re-fetch platform profiles
+            supabase.from('profiles').select('*, roasts(*)').eq('platform', platformName).order('created_at', { ascending: false })
+              .then(({ data }) => { if (data) setProfiles(data); });
+          })
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'roasts' }, (payload) => {
+            if (profilesRef.current.some(p => p.id === payload.new?.profile_id)) {
+              setRoasts(prev => [payload.new, ...prev]);
+            }
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'roasts' }, (payload) => {
+            setRoasts(prev => prev.map(r => r.id === payload.new?.id ? payload.new : r));
+          })
+    );
+  }, [platformKey, platformName]);
 
   // Optimistic upvote
   const handleUpvote = async (roast) => {
