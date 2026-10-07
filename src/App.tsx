@@ -561,7 +561,7 @@ export default function App() {
                 </div>
               ))}
               <div className="text-center py-4">
-                <p className="text-xs font-mono text-zinc-500 animate-pulse">🔥 Loading burns from Supabase...</p>
+                <p className="text-xs font-mono text-zinc-500 animate-pulse">Loading burns...</p>
               </div>
             </div>
           ) : (

@@ -12,6 +12,8 @@ import TodayOnBurnBoard from '@/components/feed/TodayOnBurnBoard';
 import TrendingSidebar from '@/components/feed/TrendingSidebar';
 import { track } from '@/lib/analytics';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { subscribeRealtime } from '@/lib/realtime';
+import { mergeFeedItems, isKnownItem } from '@/lib/feed/clientUtils';
 
 /**
  * /home — BurnBoard Social Feed
@@ -51,18 +53,46 @@ export default function SocialHomePage() {
   const [trendingWindow, setTrendingWindow] = useState('today');
   const [signedIn, setSignedIn] = useState(false);
   const [feedMeta, setFeedMeta] = useState({ personalized: false, coldStart: false, followingEmpty: false });
+  const [hasNew, setHasNew] = useState(false);
+  // Developer diagnostics (?debug=feed): exposes only product-level feed
+  // metadata (counts, cursors, personalization flags). Internal ranking
+  // scores are never sent by the API and never shown here.
+  const [debugFeed] = useState(() =>
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('debug') === 'feed'
+  );
   const observerRef = useRef(null);
   const loadMoreRef = useRef(null);
+  // Refs mirror state so the stable fetch callback never closes over stale
+  // values (stale cursor/loading closures caused repeated requests).
+  const cursorRef = useRef(null);
+  const itemsRef = useRef([]);
+  const hasMoreRef = useRef(true);
+  const busyRef = useRef(false);
+  const seqRef = useRef(0);
+  const abortRef = useRef(null);
+  const userIdRef = useRef(null);
+  const tabRef = useRef('for_you');
+  const windowRef = useRef('today');
 
   // Resolve auth state so signed-in users get the Following tab + feedback
   // controls (the API is the enforcement point; the UI only reveals intent).
-  useEffect(() => {
-    let cancelled = false;
-    if (!isSupabaseConfigured || !supabase) return undefined;
-    supabase.auth.getUser().then(({ data }) => {
-      if (!cancelled) setSignedIn(!!data?.user);
-    }).catch(() => {});
-    return () => { cancelled = true; };
+  // On account switch the previous user's personalized feed is dropped
+  // immediately so it can never leak into the new session.
+  const resetFeedState = useCallback(() => {
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch {}
+    }
+    seqRef.current += 1;
+    busyRef.current = false;
+    cursorRef.current = null;
+    itemsRef.current = [];
+    hasMoreRef.current = true;
+    setItems([]);
+    setCursor(null);
+    setHasMore(true);
+    setHasNew(false);
+    setError(null);
   }, []);
 
   // Track feed view
@@ -70,49 +100,67 @@ export default function SocialHomePage() {
     track('feed_viewed', { tab: activeTab });
   }, [activeTab]);
 
-  // Fetch feed items
+  // Fetch feed items. Stable identity: pagination appends only unseen
+  // `${type}:${id}` items, refresh replaces. A sequence guard + abort
+  // controller prevent request storms and stale responses overwriting newer
+  // state. Technical failures are logged; the UI only shows a friendly retry.
   const fetchFeed = useCallback(async (isRefresh = false) => {
-    if (loadingMore && !isRefresh) return;
+    if (busyRef.current && !isRefresh) return;
+    if (!isRefresh && !hasMoreRef.current) return;
+
+    // Refresh preempts any in-flight page request.
+    if (isRefresh && abortRef.current) {
+      try { abortRef.current.abort(); } catch {}
+    }
+    busyRef.current = true;
+    const seq = ++seqRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const tab = tabRef.current;
+    const win = windowRef.current;
 
     try {
       if (isRefresh) {
         setLoading(true);
-        setItems([]);
-        setCursor(null);
-        setHasMore(true);
-      } else if (cursor) {
+        setError(null);
+      } else if (cursorRef.current) {
         setLoadingMore(true);
+      } else {
+        setLoading(true);
       }
 
       const params = new URLSearchParams({
-        tab: activeTab,
+        tab,
         limit: '20',
       });
 
-      if (cursor && !isRefresh) {
-        params.set('cursor', cursor);
+      if (!isRefresh && cursorRef.current) {
+        params.set('cursor', cursorRef.current);
       }
 
-      if (activeTab === 'trending') {
-        params.set('window', trendingWindow);
+      if (tab === 'trending') {
+        params.set('window', win);
       }
 
-      const res = await fetch(`/api/feed?${params}`);
-      const data = await res.json();
+      const res = await fetch(`/api/feed?${params}`, { signal: controller.signal });
+      const data = await res.json().catch(() => ({}));
+      if (seq !== seqRef.current) return; // superseded by a newer request
 
-      if (!res.ok) throw new Error(data.error || 'Failed to load feed');
+      if (!res.ok) throw new Error(data.error || `Feed request failed (${res.status})`);
 
-      if (isRefresh || !cursor) {
-        setItems(data.items || []);
-      } else {
-        setItems(prev => [...prev, ...(data.items || [])]);
-      }
+      const incoming = Array.isArray(data.items) ? data.items : [];
+      const next = mergeFeedItems(isRefresh ? [] : itemsRef.current, incoming, isRefresh);
+      itemsRef.current = next;
+      setItems(next);
 
-      setCursor(data.nextCursor);
+      cursorRef.current = data.nextCursor || null;
+      setCursor(data.nextCursor || null);
+      hasMoreRef.current = !!data.nextCursor;
       setHasMore(!!data.nextCursor);
       setError(null);
+      if (isRefresh) setHasNew(false);
       // Following is chronologically empty whenever there is nothing to show.
-      const followingEmpty = activeTab === 'following' && !(data.items || []).length;
+      const followingEmpty = tab === 'following' && next.length === 0 && incoming.length === 0;
       setFeedMeta({
         personalized: !!data.personalized,
         coldStart: !!data.coldStart,
@@ -120,26 +168,75 @@ export default function SocialHomePage() {
       });
 
       // Track impressions
-      if (data.items?.length) {
+      if (incoming.length) {
         track('feed_loaded', {
-          tab: activeTab,
-          count: data.items.length,
+          tab,
+          count: incoming.length,
           hasMore: !!data.nextCursor,
         });
       }
     } catch (err) {
+      if (err?.name === 'AbortError') return;
+      if (seq !== seqRef.current) return;
       console.error('[Feed] Error:', err);
-      setError(err.message);
+      setError('load_failed');
     } finally {
+      if (seq === seqRef.current) busyRef.current = false;
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [activeTab, cursor, trendingWindow, loadingMore]);
+  }, []);
 
-  // Initial load and tab change
+  // Auth: initial resolve + account-switch reset (no cross-user feed leak).
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return undefined;
+    let cancelled = false;
+    supabase.auth.getUser().then(({ data }) => {
+      if (cancelled) return;
+      userIdRef.current = data?.user?.id || null;
+      setSignedIn(!!data?.user);
+    }).catch(() => {});
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextId = session?.user?.id || null;
+      if (nextId !== userIdRef.current) {
+        userIdRef.current = nextId;
+        setSignedIn(!!nextId);
+        resetFeedState();
+        fetchFeed(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+      try { sub?.subscription?.unsubscribe(); } catch {}
+    };
+  }, [fetchFeed, resetFeedState]);
+
+  // Initial load
   useEffect(() => {
     fetchFeed(true);
-  }, [activeTab, trendingWindow]);
+  }, [fetchFeed]);
+
+  // Realtime complements the ranked feed: new posts raise a non-intrusive
+  // "new burns" pill instead of being injected at the top (no jumps, no
+  // duplicates, no ranking disruption). Cleanup removes the channel.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return undefined;
+    return subscribeRealtime(supabase, 'home-feed', (ch) =>
+      ch
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'social_posts' }, (payload) => {
+          const row = payload?.new;
+          if (row?.id && !isKnownItem(itemsRef.current, row.id, row.content_type || 'social_post')) {
+            setHasNew(true);
+          }
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'roasts' }, (payload) => {
+          const row = payload?.new;
+          if (row?.id && !isKnownItem(itemsRef.current, row.id, 'roast')) {
+            setHasNew(true);
+          }
+        })
+    );
+  }, []);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -163,9 +260,20 @@ export default function SocialHomePage() {
 
   // Handle tab change
   const handleTabChange = useCallback((tab) => {
+    tabRef.current = tab;
     setActiveTab(tab);
+    resetFeedState();
     track('feed_tab_changed', { tab });
-  }, []);
+    fetchFeed(true);
+  }, [fetchFeed, resetFeedState]);
+
+  // Handle trending window change
+  const handleWindowChange = useCallback((win) => {
+    windowRef.current = win;
+    setTrendingWindow(win);
+    resetFeedState();
+    fetchFeed(true);
+  }, [fetchFeed, resetFeedState]);
 
   // Handle reaction
   const handleReaction = useCallback((item, type) => {
@@ -227,7 +335,7 @@ export default function SocialHomePage() {
                 </h1>
               </div>
               <button
-                onClick={() => fetchFeed(true)}
+                onClick={() => { resetFeedState(); fetchFeed(true); }}
                 disabled={loading}
                 className="p-2 rounded-xl hover:bg-[#1a1a1a] transition-colors text-zinc-400 hover:text-white"
                 aria-label="Refresh feed"
@@ -264,9 +372,9 @@ export default function SocialHomePage() {
                 {TRENDING_WINDOWS.map(w => {
                   const Icon = w.icon;
                   return (
-                    <button
-                      key={w.key}
-                      onClick={() => setTrendingWindow(w.key)}
+                      <button
+                        key={w.key}
+                        onClick={() => handleWindowChange(w.key)}
                       className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-mono font-bold transition-all ${
                         trendingWindow === w.key
                           ? 'bg-[#1a1a1a] text-white border border-[#333]'
@@ -293,16 +401,37 @@ export default function SocialHomePage() {
             </div>
           )}
 
-          {/* Error State */}
+          {/* Error State — friendly copy only; technical details stay in logs */}
           {error && !loading && (
-            <div className="bg-red-950/30 border border-red-500/30 rounded-2xl p-6 text-center space-y-3">
-              <p className="text-sm text-red-400 font-mono">{error}</p>
+            <div className="bg-[#111] border border-[#333] rounded-2xl p-6 text-center space-y-3">
+              <p className="text-sm text-zinc-200 font-bold">Couldn&apos;t load your feed.</p>
               <button
-                onClick={() => fetchFeed(true)}
-                className="text-xs font-mono text-[#ff4d00] hover:text-white transition-colors"
+                onClick={() => { resetFeedState(); fetchFeed(true); }}
+                className="px-5 py-2.5 bg-[#ff4d00] text-black text-xs font-mono font-bold rounded-xl hover:bg-[#ff6622] transition-colors"
               >
                 Try again
               </button>
+            </div>
+          )}
+
+          {/* Realtime: new content is one tap away — never auto-injected */}
+          {hasNew && !loading && !error && items.length > 0 && (
+            <div className="flex justify-center">
+              <button
+                onClick={() => { resetFeedState(); fetchFeed(true); }}
+                className="px-4 py-2 bg-[#ff4d00] text-black text-xs font-mono font-bold rounded-full hover:bg-[#ff6622] transition-colors shadow-[0_0_20px_rgba(255,77,0,0.35)]"
+              >
+                ↑ New burns available — refresh
+              </button>
+            </div>
+          )}
+
+          {/* Developer diagnostics (?debug=feed) — product metadata only */}
+          {debugFeed && !loading && (
+            <div className="bg-[#0d0d0d] border border-dashed border-[#333] rounded-xl px-3 py-2">
+              <p className="text-[10px] font-mono text-zinc-500">
+                feed.debug tab={activeTab} items={items.length} hasMore={String(hasMore)} cursor={cursor || 'none'} personalized={String(feedMeta.personalized)} coldStart={String(feedMeta.coldStart)}
+              </p>
             </div>
           )}
 
@@ -358,12 +487,12 @@ export default function SocialHomePage() {
 
               {/* Cold-start interest picker — real explicit preferences */}
               {activeTab === 'for_you' && signedIn && feedMeta.personalized && feedMeta.coldStart && (
-                <InterestPicker onApplied={() => fetchFeed(true)} />
+                <InterestPicker onApplied={() => { resetFeedState(); fetchFeed(true); }} />
               )}
 
               {items.map(item => (
                 <FeedCard
-                  key={item.id}
+                  key={`${item.type}-${item.id}`}
                   item={item}
                   onReaction={handleReaction}
                   onUpvote={handleUpvote}

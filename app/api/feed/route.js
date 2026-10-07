@@ -108,10 +108,20 @@ async function buildGenericFeed(supabase, { cursor, limit, window, now }) {
   const roasts = roastResult.data || [];
   const posts = postResult.data || [];
 
-  const allItems = [...roasts.map(r => ({ created_at: r.created_at })), ...posts.map(p => ({ created_at: p.created_at }))];
-  allItems.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  const hasMore = allItems.length > limit;
-  const limitedItems = allItems.slice(0, limit);
+  // Chronological frontier: the cursor pages over created_at, so it must be
+  // derived from chronological order — never from the ranked display order
+  // (ranking ≠ recency would otherwise skip or repeat rows between pages).
+  const chronological = [
+    ...roasts.map(r => r.created_at),
+    ...posts.map(p => p.created_at),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+  const hasMore = roasts.length > limit || posts.length > limit || chronological.length > limit;
+  const frontier = chronological.slice(0, limit);
+  const nextCursor = hasMore && frontier.length > 0
+    ? frontier[frontier.length - 1]
+    : null;
 
   const transformed = [];
   for (const r of roasts) {
@@ -130,9 +140,6 @@ async function buildGenericFeed(supabase, { cursor, limit, window, now }) {
   }
 
   const feedItems = transformed.sort((a, b) => b.score - a.score).slice(0, limit);
-  const nextCursor = hasMore && feedItems.length > 0
-    ? feedItems[feedItems.length - 1].createdAt
-    : null;
 
   return { feedItems, nextCursor };
 }

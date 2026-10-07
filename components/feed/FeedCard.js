@@ -55,6 +55,23 @@ const CONTENT_TYPE_CONFIG = {
   hot_take: { icon: '🌶', label: 'HOT TAKE', color: 'text-red-400' },
 };
 
+// Shared in-memory cache so scrolling, pagination and rerenders never
+// refetch reaction state for an item we already resolved (60s TTL).
+// Fail-soft: a cache miss or failed fetch only keeps the server-rendered
+// counters the feed API already provided.
+const reactionCache = new Map();
+const REACTION_CACHE_TTL_MS = 60 * 1000;
+
+function getCachedReactions(key) {
+  const entry = reactionCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > REACTION_CACHE_TTL_MS) {
+    reactionCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
 function getDetailHref(item) {
   if (item.type === 'roast') return `/r/${item.id}`;
   return `/post/${item.id}`;
@@ -81,18 +98,42 @@ export default function FeedCard({
   const typeConfig = CONTENT_TYPE_CONFIG[item.type] || CONTENT_TYPE_CONFIG.roast;
   const platformBadge = item.author?.platform ? getPlatformBadge(item.author.platform) : null;
 
-  // Fetch reaction state for this item
+  // Fetch reaction state for this item (cached, abortable, never after unmount)
   useEffect(() => {
+    const targetType = item.type === 'roast' ? 'roast' : 'social_post';
+    const cacheKey = `${targetType}:${item.id}`;
+    const cached = getCachedReactions(cacheKey);
+    if (cached) {
+      if (cached.counts) setReactions(cached.counts);
+      if (cached.participantReaction !== undefined) setParticipantReaction(cached.participantReaction);
+      return undefined;
+    }
+    const controller = new AbortController();
+    let mounted = true;
     const fetchReactions = async () => {
       try {
         const participantId = getParticipantId();
-        const res = await fetch(`/api/reactions?target_type=${item.type === 'roast' ? 'roast' : 'social_post'}&target_id=${item.id}&participant_id=${encodeURIComponent(participantId)}`);
+        const res = await fetch(`/api/reactions?target_type=${targetType}&target_id=${item.id}&participant_id=${encodeURIComponent(participantId)}`, { signal: controller.signal });
         const data = await res.json();
+        if (!mounted) return;
         if (data.counts) setReactions(data.counts);
         if (data.participantReaction) setParticipantReaction(data.participantReaction);
-      } catch {}
+        reactionCache.set(cacheKey, {
+          counts: data.counts || null,
+          participantReaction: data.participantReaction ?? null,
+          ts: Date.now(),
+        });
+      } catch (err) {
+        if (err?.name !== 'AbortError') {
+          // Non-fatal: keep the counters the feed API already provided.
+        }
+      }
     };
     fetchReactions();
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
   }, [item.id, item.type]);
 
   const handleUpvote = useCallback(async () => {
