@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getRequestContext } from '@/lib/routeAuth';
 import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
+import { recordSignal, resolveContentContext } from '@/lib/reco/signals';
 
 /**
  * POST /api/share
@@ -111,6 +112,27 @@ export async function POST(req) {
       context: { source: 'share_button' },
       idempotency_key: idempotencyKey,
     });
+
+    // Real behavior signal: a signed-in user sharing feed content is a
+    // strong positive signal (strength 2.0 per SIGNAL_STRENGTH). One signal
+    // per user per item — repeat shares don't inflate affinity. Anonymous
+    // shares stay in the ledger only; no behavioral profile is fabricated.
+    if (actorId && session?.client && (resourceType === 'social_post' || resourceType === 'roast')) {
+      (async () => {
+        try {
+          const meta = await resolveContentContext(session.client, resourceType, resourceId);
+          await recordSignal({
+            client: session.client,
+            userId: actorId,
+            eventType: 'content_shared',
+            targetType: resourceType,
+            targetId: resourceId,
+            context: { ...(meta || {}), channel },
+            idempotencyKey: `share-${resourceType}-${resourceId}`,
+          });
+        } catch {}
+      })();
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {

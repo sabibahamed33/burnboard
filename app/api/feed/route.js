@@ -4,6 +4,7 @@ import { getRequestContext } from '@/lib/routeAuth';
 import { instrumentHandler } from '@/lib/metrics';
 import { transformRoastItem, transformSocialPostItem } from '@/lib/reco/items';
 import { buildPersonalizedFeed, buildFollowingFeed } from '@/lib/reco/feedBuilder';
+import { parseExcludeParam } from '@/lib/reco/exclusion';
 import { buildViewerState } from '@/lib/reco/viewer';
 import { recordSignal } from '@/lib/reco/signals';
 
@@ -204,8 +205,15 @@ async function getHandler(req) {
       const state = await buildViewerState({ client: sessionClient, userId });
       if (state && state.enabled) {
         const offset = cursor ? (parseInt(cursor, 10) || 0) : 0;
+        // Session impression-awareness: the client sends ids it already
+        // displayed (bounded); they are filtered before the page is sliced
+        // so re-ranking shifts can't duplicate or skip content.
+        const exclude = parseExcludeParam(searchParams.get('exclude'));
+        // Development-only score diagnostics. Gated on NODE_ENV so
+        // production can never emit internal ranking internals.
+        const debug = process.env.NODE_ENV !== 'production' && searchParams.get('debug') === '1';
         const result = await buildPersonalizedFeed({
-          client: sessionClient, state, offset, limit,
+          client: sessionClient, state, offset, limit, exclude, debug,
         });
 
         // Weak impression signals from what was genuinely served (viewed).

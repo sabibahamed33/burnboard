@@ -13,7 +13,7 @@ import TrendingSidebar from '@/components/feed/TrendingSidebar';
 import { track } from '@/lib/analytics';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { subscribeRealtime } from '@/lib/realtime';
-import { mergeFeedItems, isKnownItem } from '@/lib/feed/clientUtils';
+import { mergeFeedItems, isKnownItem, accumulateSeenKeys } from '@/lib/feed/clientUtils';
 
 /**
  * /home — BurnBoard Social Feed
@@ -74,6 +74,11 @@ export default function SocialHomePage() {
   const userIdRef = useRef(null);
   const tabRef = useRef('for_you');
   const windowRef = useRef('today');
+  // Bounded server-namespaced keys of everything displayed this session.
+  // Sent back as `exclude` on paginated requests so the re-ranked next page
+  // can neither duplicate nor silently skip content (impression awareness).
+  const seenRef = useRef([]);
+  const debugRef = useRef(debugFeed);
 
   // Resolve auth state so signed-in users get the Following tab + feedback
   // controls (the API is the enforcement point; the UI only reveals intent).
@@ -88,6 +93,7 @@ export default function SocialHomePage() {
     cursorRef.current = null;
     itemsRef.current = [];
     hasMoreRef.current = true;
+    seenRef.current = [];
     setItems([]);
     setCursor(null);
     setHasMore(true);
@@ -138,6 +144,20 @@ export default function SocialHomePage() {
         params.set('cursor', cursorRef.current);
       }
 
+      // For You uses offset cursors over a re-ranked list: also send the
+      // bounded seen-set so already-displayed ids are filtered server-side
+      // before the page slice (no duplicates from ranking shifts).
+      if (!isRefresh && tab === 'for_you' && seenRef.current.length > 0) {
+        params.set('exclude', seenRef.current.join(','));
+      }
+
+      // Development diagnostics: ask the API for per-item score factors.
+      // The server only honors this outside production; normal users never
+      // receive or render internal ranking internals.
+      if (debugRef.current) {
+        params.set('debug', '1');
+      }
+
       if (tab === 'trending') {
         params.set('window', win);
       }
@@ -152,6 +172,8 @@ export default function SocialHomePage() {
       const next = mergeFeedItems(isRefresh ? [] : itemsRef.current, incoming, isRefresh);
       itemsRef.current = next;
       setItems(next);
+      // Remember everything displayed this session (bounded server keys).
+      seenRef.current = accumulateSeenKeys(isRefresh ? [] : seenRef.current, incoming);
 
       cursorRef.current = data.nextCursor || null;
       setCursor(data.nextCursor || null);
@@ -491,8 +513,8 @@ export default function SocialHomePage() {
               )}
 
               {items.map(item => (
+                <React.Fragment key={`${item.type}-${item.id}`}>
                 <FeedCard
-                  key={`${item.type}-${item.id}`}
                   item={item}
                   onReaction={handleReaction}
                   onUpvote={handleUpvote}
@@ -501,6 +523,13 @@ export default function SocialHomePage() {
                   onNotInterested={signedIn ? handleNotInterested : null}
                   onHide={signedIn ? handleHide : null}
                 />
+                {debugFeed && item.debug && (
+                  <p className="text-[10px] font-mono text-zinc-600 px-1 -mt-2">
+                    dev src={item.debug.source || '?'} score={item.debug.score} age={item.debug.ageHours}h eng={item.debug.engagement}
+                    {' '}rel={item.debug.factors?.following}+{item.debug.factors?.creator} pop={item.debug.factors?.popularity} fresh={item.debug.factors?.freshness} qual={item.debug.factors?.creatorQuality} vel={item.debug.factors?.velocity} boost={item.debug.factors?.launchBoost}
+                  </p>
+                )}
+                </React.Fragment>
               ))}
             </div>
           )}

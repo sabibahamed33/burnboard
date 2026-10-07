@@ -17,7 +17,9 @@
  * Run: node scripts/feed-quality-test.js
  */
 
-import { feedItemKey, mergeFeedItems, isKnownItem } from '../lib/feed/clientUtils.js';
+import { feedItemKey, mergeFeedItems, isKnownItem, excludeKey, accumulateSeenKeys } from '../lib/feed/clientUtils.js';
+import { parseExcludeParam, excludeSeen, candidateKey } from '../lib/reco/exclusion.js';
+import { track } from '../lib/analytics.js';
 
 let passed = 0;
 let failed = 0;
@@ -115,4 +117,49 @@ console.log('\nIDENTITY — stable keys across rerenders');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
+
+// ── Session exclusion (impression awareness, §11/§12) ──────────
+console.log('\nEXCLUSION — already-served ids never re-served');
+{
+  const ordered = [
+    { candidate: { kind: 'social_post', id: 'a' }, score: 3 },
+    { candidate: { kind: 'social_post', id: 'b' }, score: 2 },
+    { candidate: { kind: 'roast', id: 'a' }, score: 1 },
+  ];
+  const exclude = parseExcludeParam('social_post:a,roast:zzz,garbage!!!,social_post:a');
+  assert('malformed entries dropped, dupes collapsed', exclude.size === 2, [...exclude].join(','));
+  const kept = excludeSeen(ordered, exclude);
+  assert('served id filtered, cross-table collision kept', kept.length === 2 && kept[0].candidate.id === 'b' && kept[1].candidate.kind === 'roast');
+  assert('empty exclude is a no-op pass-through', excludeSeen(ordered, new Set()).length === 3);
+  assert('candidateKey namespaces tables', candidateKey({ kind: 'roast', id: 'a' }) === 'roast:a');
+  assert('over-long/evil keys rejected', parseExcludeParam('social_post:' + 'x'.repeat(500)).size === 0);
+  const big = Array.from({ length: 300 }, (_, i) => `social_post:${i}`).join(',');
+  assert('exclude set bounded to 150', parseExcludeParam(big).size === 150);
+}
+
+// ── Client exclusion keys ───────────────────────────────────────
+console.log('\nEXCLUDE-KEYS — display types map to server namespaces');
+{
+  assert('roast maps to roast namespace', excludeKey({ type: 'roast', id: '1' }) === 'roast:1');
+  assert('opinion maps to social_post namespace', excludeKey({ type: 'opinion', id: '2' }) === 'social_post:2');
+  assert('poll maps to social_post namespace', excludeKey({ type: 'poll', id: '3' }) === 'social_post:3');
+  assert('missing id yields null', excludeKey({ type: 'roast' }) === null);
+  const acc = accumulateSeenKeys([], [{ type: 'roast', id: '1' }, { type: 'roast', id: '1' }, { type: 'opinion', id: '2' }]);
+  assert('accumulation dedupes within session', acc.length === 2, acc.join(','));
+  const flood = Array.from({ length: 200 }, (_, i) => ({ type: 'opinion', id: String(i) }));
+  assert('accumulation bounded to 150', accumulateSeenKeys([], flood).length === 150);
+}
+
+// ── Analytics event quality (§29) ───────────────────────────────
+console.log('\nANALYTICS — rerender echoes suppressed, real events kept');
+{
+  const first = track('test_event_qa', { a: 1 });
+  const echo = track('test_event_qa', { a: 1 });
+  const different = track('test_event_qa', { a: 2 });
+  assert('first emission passes', first === true);
+  assert('identical immediate repeat suppressed', echo === false);
+  assert('changed payload passes', different === true);
+}
+
+console.log(`\n${passed} passed, ${failed} failed (final)`);
 process.exit(failed === 0 ? 0 : 1);
