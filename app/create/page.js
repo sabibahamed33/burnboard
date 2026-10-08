@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { track } from '@/lib/analytics';
+import { t } from '@/lib/lang';
 import PhotoComposer from '@/components/create/PhotoComposer';
 import ShareButton from '@/components/growth/ShareButton';
 
@@ -121,6 +122,11 @@ export default function CreatePage() {
 
   // Draft protection
   const DRAFT_KEY = 'burnboard_create_draft';
+
+  // Opened analytics (once per mount — funnel entry, no content).
+  useEffect(() => {
+    track('create_opened', {});
+  }, []);
 
   // Load draft on mount (skipped when composing a challenge entry)
   useEffect(() => {
@@ -280,9 +286,11 @@ export default function CreatePage() {
     clearDraft();
   }, [clearDraft]);
 
-  // Handle publish
+  // Handle publish (in-flight ref stops double taps cold; the server
+  // also dedupes identical reposts within 90 seconds).
+  const submittingRef = useRef(false);
   const handlePublish = useCallback(async () => {
-    if (!selectedType) return;
+    if (!selectedType || submittingRef.current) return;
 
     // Validate
     if (selectedType.minLength > 0 && text.trim().length < selectedType.minLength) {
@@ -299,9 +307,14 @@ export default function CreatePage() {
     }
 
     setIsSubmitting(true);
+    submittingRef.current = true;
     setError('');
 
     try {
+      if (typeof navigator !== 'undefined' && navigator && 'onLine' in navigator && !navigator.onLine) {
+        setError(t('create_offline_draft'));
+        return;
+      }
       const payload = {
         content_type: selectedType.type,
         text: text.trim(),
@@ -341,10 +354,15 @@ export default function CreatePage() {
       clearDraft();
       track('publish_succeeded', { type: selectedType.type });
     } catch (err) {
-      setError('Something went wrong. Please try again.');
-      track('publish_failed', { type: selectedType.type, error: err.message });
+      if (typeof navigator !== 'undefined' && navigator && 'onLine' in navigator && !navigator.onLine) {
+        setError(t('create_offline_draft'));
+      } else {
+        setError(t('err_generic'));
+      }
+      track('publish_failed', { type: selectedType.type });
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
   }, [selectedType, text, context, options, clearDraft, targetCommunityId, challengeCtx]);
 
@@ -689,11 +707,12 @@ export default function CreatePage() {
 
           {/* Publish Button (photo uses its own composer actions) */}
           {selectedType.type !== 'photo' && (
-          <button
+          <div className="sticky bottom-4 z-10" style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+            <button
             onClick={handlePublish}
             disabled={isSubmitting || text.trim().length < selectedType.minLength}
             aria-busy={isSubmitting}
-            className="btn-burn tactile w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-sm uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn-burn tactile min-h-[52px] w-full rounded-2xl flex items-center justify-center gap-2 text-sm uppercase tracking-wider font-black shadow-[0_8px_32px_rgba(255,77,0,0.35)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
           >
             {isSubmitting ? (
               <span className="spinner w-4 h-4" aria-hidden />
@@ -704,6 +723,7 @@ export default function CreatePage() {
               </>
             )}
           </button>
+          </div>
           )}
         </div>
       </div>
@@ -712,46 +732,45 @@ export default function CreatePage() {
 
   // ── Step 1: Choose Content Type ──────────────────────────
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
-      <div className="max-w-lg mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#222] pb-4">
-          <Link href="/home" className="flex items-center gap-2 text-zinc-400 hover:text-white font-mono text-xs transition-colors">
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back</span>
+    <div className="min-h-screen bg-[#0a0a0a] pb-28 font-sans text-white sm:pb-16">
+      <div className="mx-auto w-full max-w-lg space-y-6 px-4 pt-4 sm:px-6">
+        {/* Brand header */}
+        <header className="flex min-h-[44px] items-center justify-between">
+          <Link href="/home" className="flex items-center gap-1.5" aria-label="Back to feed">
+            <ArrowLeft className="h-4 w-4 text-zinc-400" />
+            <Flame className="h-5 w-5 fill-[#ff4d00] text-[#ff4d00]" />
+            <span className="text-[15px] font-black tracking-wide text-white">BURNBOARD</span>
           </Link>
-          <div className="flex items-center gap-2 text-[#ff4d00] font-mono font-black text-sm">
-            <Flame className="w-4 h-4 fill-[#ff4d00]" />
-            <span>CREATE</span>
-          </div>
-        </div>
+          <span className="font-mono text-[11px] font-black uppercase tracking-wider text-[#ff4d00]">Create</span>
+        </header>
 
-        {/* Question */}
-        <div className="text-center space-y-2">
-          <h1 className="text-xl font-black text-white uppercase tracking-wider">
-            What&apos;s happening?
+        {/* Hero */}
+        <div className="space-y-1 text-center">
+          <h1 className="text-[26px] font-black leading-none tracking-tight text-white">
+            {t('create_title')}
           </h1>
-          <p className="text-xs text-zinc-400">
-            Choose what you want to share with the community
+          <p className="text-[13px] text-zinc-400">
+            {t('create_subtitle')}
           </p>
         </div>
 
         {/* Content Type Grid */}
-        <div className="space-y-3">
+        <div className="space-y-2.5" role="list" aria-label="Content types">
           {/* Roast (featured) */}
           <button
             onClick={() => handleTypeSelect(ROAST_TYPE)}
-            className={`w-full text-left p-4 sm:p-5 rounded-2xl border-2 transition-all active:scale-[0.98] ${
+            role="listitem"
+            className={`w-full min-h-[76px] rounded-[20px] border-2 p-4 text-left transition-all active:scale-[0.98] sm:p-5 ${
               ROAST_TYPE.activeColor || ROAST_TYPE.color
             }`}
           >
             <div className="flex items-center gap-4">
-              <span className="text-3xl">{ROAST_TYPE.icon}</span>
+              <span className="text-3xl" aria-hidden="true">{ROAST_TYPE.icon}</span>
               <div className="flex-1 min-w-0">
                 <p className="text-base font-bold text-white">{ROAST_TYPE.label}</p>
                 <p className="text-xs text-zinc-400 mt-0.5">{ROAST_TYPE.description}</p>
               </div>
-              <div className="text-[#ff4d00] shrink-0">
+              <div className="text-[#ff4d00] shrink-0" aria-hidden="true">
                 <ArrowLeft className="w-4 h-4 rotate-180" />
               </div>
             </div>
@@ -762,15 +781,15 @@ export default function CreatePage() {
             <button
               key={type.type}
               onClick={() => handleTypeSelect(type)}
-              className={`w-full text-left p-4 rounded-2xl border transition-all active:scale-[0.98] ${type.color}`}
+              className={`w-full min-h-[72px] rounded-[20px] border border-white/10 bg-white/[0.03] p-4 text-left backdrop-blur-xl transition-all hover:border-white/25 active:scale-[0.98]`}
             >
               <div className="flex items-center gap-4">
-                <span className="text-2xl">{type.icon}</span>
+                <span className="text-2xl" aria-hidden="true">{type.icon}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-white">{type.label}</p>
                   <p className="text-[11px] text-zinc-400 mt-0.5">{type.description}</p>
                 </div>
-                <div className="text-zinc-500 shrink-0">
+                <div className="text-zinc-600 shrink-0" aria-hidden="true">
                   <ArrowLeft className="w-4 h-4 rotate-180" />
                 </div>
               </div>

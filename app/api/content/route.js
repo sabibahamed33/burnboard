@@ -5,6 +5,7 @@ import { runDeterministicPolicy, canUserPerform } from '@/lib/safety';
 import { recordSignal } from '@/lib/reco/signals';
 import { pingMilestones } from '@/lib/creator/milestones';
 import { VISIBILITY, validatePhotoMetadata } from '@/lib/photoPosts';
+import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
 
 /**
  * POST /api/content
@@ -168,6 +169,46 @@ export async function POST(req) {
           { status: 403 }
         );
       }
+    }
+
+    // Creation rate limit: per-user when signed in, per-IP otherwise.
+    // Stops automated floods; legitimate posting never approaches 30/hr.
+    try {
+      const key = contextUserId
+        ? ipKey(contextUserId, 'content_user')
+        : ipKey(getClientIp(req), 'content_ip');
+      const createLimit = rateLimitMiddleware(key, RATE_LIMITS.CONTENT_CREATE);
+      if (createLimit.blocked) {
+        return NextResponse.json(
+          { error: createLimit.response.error, retryAfter: createLimit.retryAfterSeconds },
+          { status: 429 }
+        );
+      }
+    } catch {}
+
+    // Duplicate-post protection: an identical post (same author, type,
+    // text, media) within 90 seconds is a double tap or retry — return
+    // the original instead of creating a twin. Deliberate reposts (later,
+    // or any field different) are unaffected.
+    if (contextUserId) {
+      try {
+        const since = new Date(Date.now() - 90 * 1000).toISOString();
+        const { data: twinRows } = await contextClient
+          .from('social_posts')
+          .select('id, content_type, content_text, media_url, visibility, metadata, community_id, challenge_id, created_at')
+          .eq('user_id', contextUserId)
+          .eq('content_type', content_type)
+          .eq('content_text', (text || '').trim())
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        const dupe = (twinRows || []).find(
+          (r) => (r.media_url || null) === (cleanMediaUrl || null)
+        );
+        if (dupe) {
+          return NextResponse.json({ success: true, post: dupe, deduped: true });
+        }
+      } catch {}
     }
     if (isContextPost && (!contextClient || !contextUserId)) {
       return NextResponse.json(

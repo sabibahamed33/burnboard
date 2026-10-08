@@ -6,6 +6,7 @@ import {
   CalendarClock, Save, Flame, ChevronDown, Check, Loader2,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { t } from '@/lib/lang';
 import { useDebouncedValue } from '@/lib/motion';
 import Avatar from '@/components/ui/Avatar';
 import BottomSheet from '@/components/ui/BottomSheet';
@@ -412,9 +413,18 @@ export default function PhotoComposer({
       setError('Sign in to share photos.');
       return;
     }
+    if (typeof navigator !== 'undefined' && navigator && 'onLine' in navigator && !navigator.onLine) {
+      // Offline: keep everything (file stays in memory, meta in the draft).
+      // Never claim an upload happened.
+      setError(t('create_offline_photo'));
+      return;
+    }
     setSubmitting(true);
     setSubmitMode(mode);
     setError('');
+    // Tracks the uploaded object so a failed publish can clean up after
+    // itself instead of orphaning media (best-effort).
+    let uploadedPath = null;
     try {
       // Upload happens ONLY on explicit action — never on file select.
       const path = `${userId}/${Date.now()}.jpg`;
@@ -423,6 +433,7 @@ export default function PhotoComposer({
         upsert: false,
       });
       if (uploadError) throw new Error('Photo upload failed. Please try again.');
+      uploadedPath = path;
       const { data: urlData } = supabase.storage.from('post-media').getPublicUrl(path);
       const mediaUrl = urlData?.publicUrl;
       if (!mediaUrl) throw new Error('Photo upload failed. Please try again.');
@@ -455,6 +466,13 @@ export default function PhotoComposer({
       } catch {}
       onPublished?.(data.post);
     } catch (e) {
+      // Publish failed after upload: remove the orphaned object so a retry
+      // starts clean. The composer state (file + details) is preserved.
+      if (uploadedPath) {
+        try {
+          await supabase.storage.from('post-media').remove([uploadedPath]);
+        } catch {}
+      }
       setError(e.message || 'Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
