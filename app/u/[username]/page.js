@@ -66,8 +66,13 @@ export default function UserProfilePage() {
   const [badges, setBadges] = useState([]);
   const [streak, setStreak] = useState(null);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [followsViewer, setFollowsViewer] = useState(false);
   const [isOwnProfile, setIsOwnProfile] = useState(false);
   const [content, setContent] = useState([]);
+  const [roasts, setRoasts] = useState([]);
+  const [contentCursor, setContentCursor] = useState(null);
+  const [contentHasMore, setContentHasMore] = useState(false);
+  const [contentLoadingMore, setContentLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [contentLoading, setContentLoading] = useState(true);
   const [error, setError] = useState('');
@@ -103,6 +108,7 @@ export default function UserProfilePage() {
         setProfile(data.profile);
         setStats(data.stats);
         setIsFollowing(data.isFollowing);
+        setFollowsViewer(!!data.followsViewer);
         setIsOwnProfile(data.isOwnProfile);
         
         // Fetch reputation data
@@ -125,27 +131,65 @@ export default function UserProfilePage() {
     fetchProfile();
   }, [username]);
 
-  // Fetch content
+  // Fetch content (published posts + authored roasts, cursor-paged)
   useEffect(() => {
     if (!profile?.id) return;
+    let cancelled = false;
 
     const fetchContent = async () => {
       setContentLoading(true);
       try {
-        const res = await fetch(`/api/profile/content?user_id=${profile.id}&limit=20`);
-        const data = await res.json();
-        if (res.ok) {
-          setContent(data.items || []);
+        const [postsRes, roastsRes] = await Promise.all([
+          fetch(`/api/profile/content?user_id=${profile.id}&limit=20`),
+          fetch(`/api/profile/content?user_id=${profile.id}&limit=20&filter=roasts`),
+        ]);
+        if (cancelled) return;
+        const postsData = await postsRes.json().catch(() => ({}));
+        const roastsData = await roastsRes.json().catch(() => ({}));
+        if (postsRes.ok) {
+          setContent(postsData.items || []);
+          setContentCursor(postsData.nextCursor || null);
+          setContentHasMore(!!postsData.hasMore);
+        }
+        if (roastsRes.ok) {
+          setRoasts(roastsData.items || []);
         }
       } catch (err) {
         console.error('[Profile] Content error:', err);
       } finally {
-        setContentLoading(false);
+        if (!cancelled) setContentLoading(false);
       }
     };
 
     fetchContent();
+    return () => { cancelled = true; };
   }, [profile?.id]);
+
+  const loadMoreContent = useCallback(async () => {
+    if (contentLoadingMore || !contentCursor || !profile?.id) return;
+    setContentLoadingMore(true);
+    try {
+      const res = await fetch(`/api/profile/content?user_id=${profile.id}&limit=20&cursor=${encodeURIComponent(contentCursor)}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const seen = new Set(content.map((c) => c.id));
+        setContent((prev) => [...prev, ...((data.items || []).filter((i) => i && !seen.has(i.id)))]);
+        setContentCursor(data.nextCursor || null);
+        setContentHasMore(!!data.hasMore);
+      }
+    } catch (err) {
+      console.error('[Profile] Content error:', err);
+    } finally {
+      setContentLoadingMore(false);
+    }
+  }, [contentCursor, contentLoadingMore, content, profile?.id]);
+
+  // Tab-visible items: Posts (non-photo), Photos, Roasts (authored).
+  const tabItems = activeTab === 'photos'
+    ? content.filter((i) => i.type === 'photo' || i.contentType === 'photo')
+    : activeTab === 'roasts'
+      ? roasts
+      : content.filter((i) => (i.type || i.contentType) !== 'photo');
 
   // Fetch pinned/featured content (public read; validated server-side)
   useEffect(() => {
@@ -170,9 +214,11 @@ export default function UserProfilePage() {
   // Owner post controls: drop deleted/unpublished rows, merge edits.
   const handleDeletedContent = useCallback((item) => {
     setContent(prev => prev.filter(x => !(x.id === item.id)));
+    setRoasts(prev => prev.filter(x => !(x.id === item.id)));
   }, []);
   const handleUpdatedContent = useCallback((updated) => {
     setContent(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+    setRoasts(prev => prev.map(x => (x.id === updated.id ? updated : x)));
   }, []);
 
   // Loading
@@ -233,11 +279,16 @@ export default function UserProfilePage() {
             />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-xl font-black text-white">
+                <h1 className="text-xl font-black text-white break-all">
                   @{profile.username}
                 </h1>
                 {profile.level && profile.level !== 'Newbie' && (
                   <Badge variant="burn" size="xs">{profile.level}</Badge>
+                )}
+                {followsViewer && !isOwnProfile && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#1a1a1a] border border-[#2a2a2a] text-zinc-400">
+                    Follows you
+                  </span>
                 )}
               </div>
 
@@ -255,11 +306,28 @@ export default function UserProfilePage() {
                   href={profile.websiteUrl}
                   target="_blank"
                   rel="noopener noreferrer nofollow"
-                  className="inline-flex items-center gap-1.5 text-xs font-mono text-[#ff4d00] hover:text-white mt-2 transition-colors"
+                  className="inline-flex items-center gap-1.5 text-xs font-mono text-[#ff4d00] hover:text-white mt-2 transition-colors break-all"
                 >
-                  <Globe className="w-3.5 h-3.5" />
+                  <Globe className="w-3.5 h-3.5 shrink-0" />
                   {profile.websiteUrl.replace(/^https?:\/\//, '').split('/')[0]}
                 </a>
+              )}
+
+              {/* Explicit display location (user-entered only, never GPS) */}
+              {profile.location && (
+                <p className="text-xs font-mono text-zinc-500 mt-1.5 truncate">
+                  📍 {profile.location}
+                </p>
+              )}
+
+              {/* Suspended-owner notice with appeal path */}
+              {isOwnProfile && profile.isBanned && (
+                <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200">
+                  Your account is currently suspended and hidden from others.{' '}
+                  <Link href="/settings/safety" className="font-bold underline underline-offset-2">
+                    Review or appeal
+                  </Link>
+                </div>
               )}
 
               {/* Topic identity tags (controlled, public) */}
@@ -414,27 +482,26 @@ export default function UserProfilePage() {
         <DraftsShelf userId={profile.id} enabled={isOwnProfile} />
 
         {/* Content Tabs */}
-        <div className="flex items-center gap-1 bg-[#111] p-1 rounded-xl border border-[#222]">
-          <button
-            onClick={() => setActiveTab('posts')}
-            className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-mono font-bold transition-all ${
-              activeTab === 'posts'
-                ? 'bg-[#ff4d00] text-black'
-                : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
-            }`}
-          >
-            Posts
-          </button>
-          <button
-            onClick={() => setActiveTab('roasts')}
-            className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-mono font-bold transition-all ${
-              activeTab === 'roasts'
-                ? 'bg-[#ff4d00] text-black'
-                : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
-            }`}
-          >
-            🔥 Roasts
-          </button>
+        <div className="flex items-center gap-1 bg-[#111] p-1 rounded-xl border border-[#222] overflow-x-auto no-scrollbar" role="tablist" aria-label="Profile content">
+          {[
+            { key: 'posts', label: 'Posts' },
+            { key: 'photos', label: 'Photos' },
+            { key: 'roasts', label: '🔥 Roasts' },
+          ].map((tabItem) => (
+            <button
+              key={tabItem.key}
+              role="tab"
+              aria-selected={activeTab === tabItem.key}
+              onClick={() => setActiveTab(tabItem.key)}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-mono font-bold transition-all whitespace-nowrap min-h-[44px] ${
+                activeTab === tabItem.key
+                  ? 'bg-[#ff4d00] text-black'
+                  : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
+              }`}
+            >
+              {tabItem.label}
+            </button>
+          ))}
         </div>
 
         {/* Content */}
@@ -444,11 +511,13 @@ export default function UserProfilePage() {
               <CardSkeleton key={i} />
             ))}
           </div>
-        ) : content.length === 0 ? (
+        ) : tabItems.length === 0 ? (
           <div className="bg-[#111] border border-dashed border-[#333] rounded-2xl p-8 text-center space-y-3">
             <div className="text-3xl">🦗</div>
             <p className="text-sm font-bold text-zinc-400">
-              {isOwnProfile ? 'No posts yet' : 'No content yet'}
+              {isOwnProfile
+                ? (activeTab === 'photos' ? 'No photos yet' : activeTab === 'roasts' ? 'No roasts yet' : 'No posts yet')
+                : 'No content yet'}
             </p>
             <p className="text-xs text-zinc-500">
               {isOwnProfile
@@ -458,7 +527,7 @@ export default function UserProfilePage() {
             {isOwnProfile && (
               <Link
                 href="/create"
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#ff4d00] text-black font-bold text-xs rounded-xl"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#ff4d00] text-black font-bold text-xs rounded-xl min-h-[44px]"
               >
                 <Flame className="w-4 h-4 fill-black" />
                 Create Post
@@ -467,9 +536,18 @@ export default function UserProfilePage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {content.filter(item => item.id !== featured?.id).map(item => (
+            {tabItems.filter(item => item.id !== featured?.id).map(item => (
               <FeedCard key={item.id} item={item} onDeleted={handleDeletedContent} onUpdated={handleUpdatedContent} />
             ))}
+            {activeTab !== 'roasts' && contentHasMore && (
+              <button
+                onClick={loadMoreContent}
+                disabled={contentLoadingMore}
+                className="w-full min-h-[44px] rounded-2xl border border-[#222] bg-[#111] text-xs font-mono font-bold text-zinc-300 hover:text-white hover:border-[#333] transition-all disabled:opacity-50"
+              >
+                {contentLoadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
           </div>
         )}
 
@@ -501,24 +579,48 @@ export default function UserProfilePage() {
 function FollowListModal({ userId, type, onClose }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const fetchUsers = async () => {
       try {
         const { viewerId } = await getViewerId();
-        const res = await fetch(`/api/follow/list?user_id=${userId}&type=${type}&viewer_id=${encodeURIComponent(viewerId || '')}`);
-        const data = await res.json();
+        const res = await fetch(`/api/follow/list?user_id=${userId}&type=${type}&viewer_id=${encodeURIComponent(viewerId || '')}&limit=20`);
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
         if (res.ok) {
           setUsers(data.users || []);
-          setHasMore(data.hasMore);
+          setCursor(data.nextCursor || null);
+          setHasMore(!!data.hasMore);
         }
       } catch {} finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     fetchUsers();
+    return () => { cancelled = true; };
   }, [userId, type]);
+
+  const loadMore = async () => {
+    if (loadingMore || !cursor) return;
+    setLoadingMore(true);
+    try {
+      const { viewerId } = await getViewerId();
+      const res = await fetch(`/api/follow/list?user_id=${userId}&type=${type}&viewer_id=${encodeURIComponent(viewerId || '')}&limit=20&cursor=${encodeURIComponent(cursor)}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const seen = new Set(users.map((u) => u.id));
+        setUsers((prev) => [...prev, ...((data.users || []).filter((u) => u && !seen.has(u.id)))]);
+        setCursor(data.nextCursor || null);
+        setHasMore(!!data.hasMore);
+      }
+    } catch {} finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
@@ -562,7 +664,7 @@ function FollowListModal({ userId, type, onClose }) {
                   key={user.id}
                   href={`/u/${user.username}`}
                   onClick={onClose}
-                  className="flex items-center gap-3 p-3 rounded-xl hover:bg-[#1a1a1a] transition-all"
+                  className="flex items-center gap-3 p-3 rounded-xl hover:bg-[#1a1a1a] transition-all min-h-[56px]"
                 >
                   <Avatar username={user.username} size="md" src={user.avatar_url} />
                   <div className="flex-1 min-w-0">
@@ -575,6 +677,15 @@ function FollowListModal({ userId, type, onClose }) {
                   </div>
                 </Link>
               ))}
+              {hasMore && (
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="w-full min-h-[44px] rounded-xl border border-[#222] text-[11px] font-mono font-bold text-zinc-300 hover:text-white transition-all disabled:opacity-50"
+                >
+                  {loadingMore ? 'Loading…' : 'Load more'}
+                </button>
+              )}
             </div>
           )}
         </div>

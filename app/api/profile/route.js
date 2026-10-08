@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getRequestContext } from '@/lib/routeAuth';
+import { relationshipBetween } from '@/lib/safety';
 
 /**
  * GET /api/profile?username=xxx or GET /api/profile?user_id=xxx
@@ -35,24 +37,86 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const username = searchParams.get('username');
     const userId = searchParams.get('user_id');
-    const viewerId = searchParams.get('viewer_id');
+    const viewerIdParam = searchParams.get('viewer_id');
 
     if (!username && !userId) {
       return NextResponse.json({ error: 'Missing username or user_id' }, { status: 400 });
     }
 
-    // Fetch profile
-    let query = supabase.from('user_profiles').select('*');
-    if (username) {
-      query = query.eq('username', username.toLowerCase());
-    } else {
-      query = query.eq('id', userId);
+    // Authoritative viewer: the signed-in session wins over any
+    // client-supplied viewer_id (prevents follow/owner spoofing).
+    let viewerId = viewerIdParam || null;
+    let sessionClient = null;
+    try {
+      const session = await getRequestContext(req);
+      if (session?.userId) {
+        viewerId = session.userId;
+        sessionClient = session.client;
+      }
+    } catch {}
+
+    // Fetch profile (explicit public columns only — never prefs/secrets).
+    const COLUMNS = 'id, username, display_name, bio, avatar_url, website_url, location_text, karma, level, visibility, featured_post_id, is_banned, follower_count, created_at';
+    const COLUMNS_FALLBACK = 'id, username, display_name, bio, avatar_url, website_url, karma, level, visibility, featured_post_id, follower_count, created_at';
+    let profile = null;
+    try {
+      let query = supabase.from('user_profiles').select(COLUMNS);
+      if (username) {
+        query = query.eq('username', username.toLowerCase());
+      } else {
+        query = query.eq('id', userId);
+      }
+      const res = await query.single();
+      if (res.error) {
+        // No row (or RLS-hidden row) reads as not-found, never as a 500.
+        if (res.error.code === 'PGRST116') {
+          return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+        }
+        throw res.error;
+      }
+      profile = res.data;
+    } catch (err) {
+      // Older snapshots may lack newer columns — retry the base shape
+      // rather than failing every profile load.
+      if (!/is_banned|location_text|column/i.test(err?.message || '')) {
+        throw err;
+      }
+      let query = supabase.from('user_profiles').select(COLUMNS_FALLBACK);
+      if (username) {
+        query = query.eq('username', username.toLowerCase());
+      } else {
+        query = query.eq('id', userId);
+      }
+      const res = await query.single();
+      if (res.error || !res.data) {
+        return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+      }
+      profile = res.data;
     }
 
-    const { data: profile, error } = await query.single();
-
-    if (error || !profile) {
+    if (!profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    }
+
+    const isOwnProfile = !!viewerId && viewerId === profile.id;
+
+    // Suspended accounts are not publicly discoverable (owner still sees
+    // their own profile with status, plus the appeal path in-app).
+    if (profile.is_banned && !isOwnProfile) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    }
+
+    // Blocked relationships hide the profile both directions (same 404 —
+    // never confirm or deny the account through this surface). The check
+    // runs on the session client because the relationship RPC only answers
+    // for the signed-in viewer.
+    if (viewerId && sessionClient && !isOwnProfile) {
+      try {
+        const rel = await relationshipBetween(sessionClient, viewerId, profile.id);
+        if (rel.viewer_blocks_other || rel.other_blocks_viewer) {
+          return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+        }
+      } catch {}
     }
 
     // Get follow counts
@@ -104,9 +168,21 @@ export async function GET(req) {
       isFollowing = !!data;
     }
 
-    // Check if this is the viewer's own profile
-    const isOwnProfile = viewerId === profile.id;
+    // Social proof: does this user follow the viewer back? (real, single row)
+    let followsViewer = false;
+    if (viewerId && viewerId !== profile.id) {
+      try {
+        const { data: back } = await supabase
+          .from('follows')
+          .select('id')
+          .eq('follower_id', profile.id)
+          .eq('following_id', viewerId)
+          .maybeSingle();
+        followsViewer = !!back;
+      } catch {}
+    }
 
+    // Check if this is the viewer's own profile (resolved above).
     return NextResponse.json({
       profile: {
         id: profile.id,
@@ -115,11 +191,13 @@ export async function GET(req) {
         bio: profile.bio,
         avatarUrl: profile.avatar_url,
         websiteUrl: profile.website_url || '',
+        location: profile.location_text || '',
         creatorTopics,
         featuredPostId: profile.featured_post_id || null,
         karma: profile.karma,
         level: profile.level,
         visibility: profile.visibility,
+        isBanned: !!profile.is_banned,
         createdAt: profile.created_at,
       },
       stats: {
@@ -129,6 +207,7 @@ export async function GET(req) {
         roastCount: roastCount || 0,
       },
       isFollowing,
+      followsViewer,
       isOwnProfile,
     });
   } catch (err) {
@@ -151,7 +230,7 @@ export async function POST(req) {
     }
 
     const body = await req.json();
-    const { display_name, bio, avatar_url, username, website_url } = body;
+    const { display_name, bio, avatar_url, username, website_url, location } = body;
 
     // Validate fields
     const updates = {};
@@ -189,6 +268,13 @@ export async function POST(req) {
       } else {
         updates.website_url = null;
       }
+    }
+
+    // Display location — explicit free text only (city/region), max 60.
+    // Never GPS, never automatic.
+    if (location !== undefined) {
+      const cleanLoc = (typeof location === 'string' ? location : '').trim().slice(0, 60);
+      updates.location_text = cleanLoc || null;
     }
 
     // Username change (special validation)

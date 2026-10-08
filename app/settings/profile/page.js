@@ -30,6 +30,7 @@ export default function EditProfilePage() {
   const [username, setUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [website, setWebsite] = useState('');
+  const [location, setLocation] = useState('');
   const [usernameAvailable, setUsernameAvailable] = useState(true);
   const [checkingUsername, setCheckingUsername] = useState(false);
 
@@ -69,6 +70,7 @@ export default function EditProfilePage() {
           setUsername(profile.username || '');
           setAvatarUrl(profile.avatar_url || '');
           setWebsite(profile.website_url || '');
+          setLocation(profile.location_text || '');
         }
 
         // Topic associations (identity tags shown on your profile)
@@ -143,6 +145,10 @@ export default function EditProfilePage() {
       setError('Website must be 200 characters or less');
       return;
     }
+    if (location && location.length > 60) {
+      setError('Location must be 60 characters or less');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -158,6 +164,7 @@ export default function EditProfilePage() {
           username: cleanUsername,
           avatar_url: avatarUrl || undefined,
           website_url: website.trim() || undefined,
+          location: location.trim() || undefined,
         }),
       });
 
@@ -309,6 +316,22 @@ export default function EditProfilePage() {
               className="w-full bg-[#111] border border-[#222] rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#ff4d00] transition-all"
             />
             <p className="text-[10px] text-zinc-600 mt-1 font-mono">Shown on your profile. https:// is added automatically.</p>
+          </div>
+
+          {/* Location (explicit only — never GPS) */}
+          <div>
+            <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
+              Location
+            </label>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="City or region, e.g. Dhaka"
+              maxLength={60}
+              className="w-full bg-[#111] border border-[#222] rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#ff4d00] transition-all"
+            />
+            <p className="text-[10px] text-zinc-600 mt-1 font-mono">Optional. Only what you type here is shown — nothing automatic.</p>
           </div>
         </div>
 

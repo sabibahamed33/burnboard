@@ -63,7 +63,7 @@ export async function GET(req) {
       const { data, error } = await query;
       if (error) {
         console.error('[Follow List] Error:', error);
-        return NextResponse.json({ users: [], hasMore: false, error: error.message });
+        return NextResponse.json({ users: [], hasMore: false, error: 'Unable to load list right now.' });
       }
 
       hasMore = (data || []).length > limit;
@@ -91,7 +91,7 @@ export async function GET(req) {
       const { data, error } = await query;
       if (error) {
         console.error('[Follow List] Error:', error);
-        return NextResponse.json({ users: [], hasMore: false, error: error.message });
+        return NextResponse.json({ users: [], hasMore: false, error: 'Unable to load list right now.' });
       }
 
       hasMore = (data || []).length > limit;

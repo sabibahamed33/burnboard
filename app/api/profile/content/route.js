@@ -15,11 +15,13 @@ import { canViewPost } from '@/lib/photoPosts';
  *   - cursor: ISO timestamp for pagination
  *   - limit: number (default: 20, max: 50)
  *   - filter: 'published' (default) | 'drafts' (owner only — private
- *     drafts/scheduled posts for the creator's own drafts shelf)
+ *     drafts/scheduled posts for the owner's own drafts shelf)
+ *     | 'roasts' (roasts authored by the user — public, unhidden only)
  *
  * Visibility: public rows for everyone; followers-only rows for followers
  * and the owner; drafts/scheduled/only_me for the owner only (via
  * ?filter=drafts). Anonymous reads see public posts only.
+ * Blocked/suspended authors serve nothing to non-owners.
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
@@ -41,7 +43,9 @@ export async function GET(req) {
     const userId = searchParams.get('user_id');
     const cursor = searchParams.get('cursor');
     const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 50);
-    const draftsOnly = searchParams.get('filter') === 'drafts';
+    const filter = searchParams.get('filter') || 'published';
+    const draftsOnly = filter === 'drafts';
+    const roastsOnly = filter === 'roasts';
 
     if (!userId) {
       return NextResponse.json({ error: 'Missing user_id' }, { status: 400 });
@@ -50,6 +54,54 @@ export async function GET(req) {
     const { client: sessionClient, userId: viewerId } = await getRequestContext(req);
     const db = sessionClient || anon;
     const isOwner = !!viewerId && viewerId === userId;
+
+    // Blocked/suspended authors serve nothing to non-owners (fail-soft:
+    // lookups that error simply yield no rows, like a quiet profile).
+    if (!isOwner) {
+      try {
+        if (viewerId && sessionClient) {
+          const { relationshipBetween } = await import('@/lib/safety');
+          const rel = await relationshipBetween(sessionClient, viewerId, userId);
+          if (rel.viewer_blocks_other || rel.other_blocks_viewer) {
+            return NextResponse.json({ items: [], hasMore: false });
+          }
+        }
+        const { data: author } = await db
+          .from('user_profiles')
+          .select('is_banned')
+          .eq('id', userId)
+          .maybeSingle();
+        if (author?.is_banned) {
+          return NextResponse.json({ items: [], hasMore: false });
+        }
+      } catch {}
+    }
+
+    // Authored roasts: public, unhidden legacy roasts (newest first).
+    if (roastsOnly) {
+      try {
+        let rq = db
+          .from('roasts')
+          .select('id, roast_text, anon_id, user_id, upvotes, reaction_haha, reaction_brutal, reaction_cry, created_at')
+          .eq('user_id', userId)
+          .eq('is_hidden', false)
+          .order('created_at', { ascending: false })
+          .limit(limit + 1);
+        if (cursor) rq = rq.lt('created_at', cursor);
+        const { data: roastRows } = await rq;
+        const { transformRoastItem } = await import('@/lib/reco/items');
+        const items = (roastRows || []).slice(0, limit).map(transformRoastItem);
+        const hasMore = (roastRows || []).length > limit;
+        return NextResponse.json({
+          items,
+          hasMore,
+          nextCursor: hasMore && items.length > 0 ? items[items.length - 1].createdAt : null,
+          count: items.length,
+        });
+      } catch {
+        return NextResponse.json({ items: [], hasMore: false });
+      }
+    }
 
     // Drafts shelf is strictly owner-only.
     if (draftsOnly && !isOwner) {
