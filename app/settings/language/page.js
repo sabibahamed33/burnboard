@@ -49,7 +49,7 @@ export default function LanguageSettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 px-4 pb-24 pt-6">
-      <Link href="/settings/profile" className="flex min-h-[44px] items-center gap-2 text-sm text-zinc-400 hover:text-white">
+      <Link href="/settings" className="flex min-h-[44px] items-center gap-2 text-sm text-zinc-400 hover:text-white">
         <ArrowLeft className="h-4 w-4" /> {t('back', current)}
       </Link>
 

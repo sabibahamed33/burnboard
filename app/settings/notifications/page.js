@@ -76,7 +76,7 @@ export default function NotificationSettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 px-4 pb-24 pt-6">
-      <Link href="/settings/profile" className="flex min-h-[44px] items-center gap-2 text-sm text-zinc-400 hover:text-white">
+      <Link href="/settings" className="flex min-h-[44px] items-center gap-2 text-sm text-zinc-400 hover:text-white">
         <ArrowLeft className="h-4 w-4" /> Settings
       </Link>
       <header className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/10 to-white/[0.02] backdrop-blur-xl p-6">

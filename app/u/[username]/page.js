@@ -328,13 +328,23 @@ export default function UserProfilePage() {
                   className="px-3 py-2 text-xs min-h-[44px]"
                 />
                 {isOwnProfile ? (
-                  <Link
-                    href="/settings/profile"
-                    className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-4 text-xs font-bold text-zinc-200 transition-all hover:border-[#ff4d00]/50 hover:text-white"
-                  >
-                    <Settings className="w-3.5 h-3.5" />
-                    Edit Profile
-                  </Link>
+                  <>
+                    <Link
+                      href="/settings/profile"
+                      className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-4 text-xs font-bold text-zinc-200 transition-all hover:border-[#ff4d00]/50 hover:text-white"
+                      aria-label="Edit profile"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      Edit Profile
+                    </Link>
+                    <Link
+                      href="/settings"
+                      aria-label="Settings"
+                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-white/15 bg-white/5 text-zinc-400 transition-all hover:border-white/25 hover:text-white"
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Link>
+                  </>
                 ) : (
                   <ProfileSafetyActions
                     targetUserId={profile.id}
