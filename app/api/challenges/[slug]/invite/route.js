@@ -33,7 +33,7 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: 'Challenge not found' }, { status: 404 });
     }
     if (challenge.creator_id !== auth.userId) {
-      return NextResponse.json({ error: 'Only the creator can view invitations' }, { status: 403 });
+      return NextResponse.json({ error: 'Only the host can view invitations' }, { status: 403 });
     }
 
     const { data: invites } = await auth.client

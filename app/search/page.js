@@ -12,9 +12,9 @@ import { CommunityCard } from '@/components/communities';
 /**
  * /search — BurnBoard discovery search.
  *
- * Server-backed across people, roasts, hashtags, communities, and topics
- * (GET /api/search). Debounced input, stale-response guard, per-account
- * local search history, friendly error/empty states.
+ * Server-backed across people, roasts, hashtags, communities, challenges,
+ * and topics (GET /api/search). Debounced input, stale-response guard,
+ * per-account local search history, friendly error/empty states.
  */
 
 const TABS = [
@@ -23,6 +23,7 @@ const TABS = [
   { key: 'roasts', label: 'Roasts', scope: 'roasts' },
   { key: 'hashtags', label: 'Hashtags', scope: 'hashtags' },
   { key: 'communities', label: 'Communities', scope: 'communities' },
+  { key: 'challenges', label: 'Challenges', scope: 'challenges' },
   { key: 'topics', label: 'Topics', scope: 'topics' },
 ];
 
@@ -187,6 +188,7 @@ export default function SearchPage() {
   const hashtagTags = results?.hashtags?.tags || [];
   const hashtagPosts = results?.hashtags?.posts || [];
   const communities = results?.communities || [];
+  const challenges = results?.challenges || [];
   const topics = results?.topics || [];
   const suggestions = results?.suggestions || [];
   const showPeople = tab === 'all' || tab === 'people';
@@ -197,6 +199,7 @@ export default function SearchPage() {
     people.length === 0 && roastList.length === 0 &&
     (tab !== 'hashtags' || hashtagTags.length === 0) &&
     (tab === 'all' || tab === 'communities' ? communities.length === 0 : true) &&
+    (tab === 'all' || tab === 'challenges' ? challenges.length === 0 : true) &&
     (tab === 'all' || tab === 'topics' ? topics.length === 0 : true);
 
   return (
@@ -227,7 +230,7 @@ export default function SearchPage() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search people, roasts, #hashtags, topics..."
+            placeholder="Search people, roasts, #hashtags, challenges, topics..."
             autoFocus
             aria-label="Search BurnBoard"
             className="w-full bg-[#111] border border-[#222] rounded-xl pl-11 pr-10 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#ff4d00] transition-colors min-h-[48px]"
@@ -386,8 +389,39 @@ export default function SearchPage() {
               </section>
             )}
 
-            {(tab === 'all' || tab === 'topics') && topics.length > 0 && (
-              <section className="space-y-3" aria-label="Topics">
+            {(tab === 'all' || tab === 'challenges') && challenges.length > 0 && (
+              <section className="space-y-3" aria-label="Challenges">
+                <p className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
+                  Challenges ({challenges.length})
+                </p>
+                <div className="grid grid-cols-1 gap-3">
+                  {challenges.map((c) => (
+                    <Link
+                      key={c.id}
+                      href={`/challenges/${c.slug}`}
+                      className="block bg-[#111] border border-[#222] hover:border-[#ff4d00]/40 rounded-xl p-4 transition-all group"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-[10px] font-mono font-bold uppercase tracking-wider ${
+                          c.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'
+                        }`}>
+                          {c.status === 'active' ? '⚡ Live' : c.status === 'ended' ? '🏁 Ended' : c.status}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-600">{c.challenge_type?.replace('_', ' ')}</span>
+                      </div>
+                      <p className="text-sm font-bold text-white group-hover:text-[#ff4d00] transition-colors line-clamp-1">
+                        {c.title}
+                      </p>
+                      {c.description && (
+                        <p className="text-xs text-zinc-400 line-clamp-2 mt-1">{c.description}</p>
+                      )}
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {(tab === 'all' || tab === 'topics') && topics.length > 0 && (              <section className="space-y-3" aria-label="Topics">
                 <p className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
                   Topics ({topics.length})
                 </p>
@@ -485,7 +519,7 @@ export default function SearchPage() {
               <div className="text-4xl">🔍</div>
               <p className="text-sm font-bold text-zinc-400">Search BurnBoard</p>
               <p className="text-xs text-zinc-500 max-w-sm mx-auto">
-                Find people, roasts, #hashtags, communities, and topics
+                Find people, roasts, #hashtags, communities, challenges, and topics
               </p>
             </div>
           </div>

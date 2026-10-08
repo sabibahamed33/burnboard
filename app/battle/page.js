@@ -179,6 +179,8 @@ export default function BattlePage() {
   const totalVotes = votes1 + votes2;
   const pct1 = totalVotes > 0 ? Math.round((votes1 / totalVotes) * 100) : 50;
   const pct2 = 100 - pct1;
+  // Live leader from authoritative server counts (ties show no leader).
+  const leader = totalVotes > 0 ? (votes1 > votes2 ? 1 : votes2 > votes1 ? 2 : 0) : 0;
 
   // ── Loading ────────────────────────────────────────────────
   if (loading) {
@@ -321,6 +323,11 @@ export default function BattlePage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="font-extrabold text-white text-lg truncate">@{fighter1.username}</h3>
+                    {leader === 1 && (
+                      <span className="text-[10px] font-black bg-[#ff4d00] text-black px-2 py-0.5 rounded-full uppercase shrink-0">
+                        Leading
+                      </span>
+                    )}
                     <span className="text-[10px] font-bold bg-[#ff4d00]/20 text-[#ff4d00] border border-[#ff4d00]/40 px-2 py-0.5 rounded-full uppercase">
                       {fighter1.platform}
                     </span>
@@ -382,6 +389,11 @@ export default function BattlePage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="font-extrabold text-white text-lg truncate">@{fighter2.username}</h3>
+                    {leader === 2 && (
+                      <span className="text-[10px] font-black bg-blue-500 text-black px-2 py-0.5 rounded-full uppercase shrink-0">
+                        Leading
+                      </span>
+                    )}
                     <span className="text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/40 px-2 py-0.5 rounded-full uppercase">
                       {fighter2.platform}
                     </span>

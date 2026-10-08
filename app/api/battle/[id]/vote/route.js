@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { getRequestContext } from '@/lib/routeAuth';
 import { checkRateLimit, ipKey, RATE_LIMITS, getClientIp } from '@/lib/serverRateLimit';
@@ -20,6 +21,12 @@ import { checkRateLimit, ipKey, RATE_LIMITS, getClientIp } from '@/lib/serverRat
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || '';
+
+const IP_SALT = process.env.RATE_LIMIT_SALT || 'burnboard_secret_salt_2024';
+
+function hashIp(ip) {
+  return crypto.createHash('sha256').update((ip || '127.0.0.1') + IP_SALT).digest('hex').substring(0, 16);
+}
 
 function getSupabase() {
   if (!supabaseUrl || !supabaseKey) return null;
@@ -74,6 +81,9 @@ export async function POST(req, { params }) {
       p_voter_key: voterKey,
       p_selection: selection,
       p_user_id: auth.userId || null,
+      // Network-identity binding for abuse analysis (salted hash only —
+      // never the raw IP, never exposed publicly).
+      p_ip_hash: hashIp(getClientIp(req)),
     });
 
     if (error) {

@@ -4,16 +4,18 @@ import { getChallengeDetail, getChallengeOutcome, isChallengeType, isValidEndsAt
 
 /**
  * GET /api/challenges/[slug]
- *   Full challenge context: creator, community, real counts, viewer state,
- *   pending invitations (when the viewer is the creator), and — when the
- *   challenge has ended — a real outcome derived from actual reactions.
+ *   Full challenge context: host, community, real counts, viewer state,
+ *   pending invitations (when the viewer is the host), and — when the
+ *   challenge has ended — a real outcome derived from actual votes
+ *   (reactions break ties).
  *
  * PATCH /api/challenges/[slug]
- *   Creator only. Body: { title?, description?, ends_at? } or
- *   { action: 'end' | 'cancel' }.
+ *   Host only. Body: { title?, description?, ends_at? } or
+ *   { action: 'end' | 'cancel' }. Ending decides the winner from real
+ *   votes, persists it, rewards the winner, and notifies participants.
  *
  * DELETE /api/challenges/[slug]
- *   Creator only. Removes the challenge; entry posts survive (SET NULL).
+ *   Host only. Removes the challenge; entry posts survive (SET NULL).
  */
 
 export async function GET(req, { params }) {
@@ -102,7 +104,7 @@ export async function PATCH(req, { params }) {
       return NextResponse.json({ error: 'Challenge not found' }, { status: 404 });
     }
     if (existing.creator_id !== auth.userId) {
-      return NextResponse.json({ error: 'Only the creator can manage this challenge' }, { status: 403 });
+      return NextResponse.json({ error: 'Only the host can manage this challenge' }, { status: 403 });
     }
 
     const body = await req.json();
@@ -115,8 +117,19 @@ export async function PATCH(req, { params }) {
       }
       updates.status = 'ended';
       updates.ends_at = new Date().toISOString();
-      // Fire-and-forget: notify participants the results are live (hook only)
+      // Decide the winner from real votes (reactions break ties), persist
+      // it on the challenge, reward the winner, and notify participants.
+      // Winner/rep/notify are best-effort; the status flip is authoritative.
       try {
+        const { getChallengeOutcome } = await import('@/lib/challenges');
+        const outcome = await getChallengeOutcome(existing.id);
+        const winner = outcome?.has_signal ? outcome.top[0] : null;
+
+        if (winner?.post_id) {
+          updates.winner_post_id = winner.post_id;
+          updates.decided_at = new Date().toISOString();
+        }
+
         const [{ data: participantRows }, { data: entryRows }] = await Promise.all([
           client.from('challenge_participants').select('user_id').eq('challenge_id', existing.id).eq('status', 'active'),
           client.from('social_posts').select('id').eq('challenge_id', existing.id).limit(1),
@@ -128,10 +141,32 @@ export async function PATCH(req, { params }) {
             challengeSlug: existing.slug,
             challengeTitle: existing.title,
             participantIds: (participantRows || []).map(p => p.user_id).filter(Boolean),
+            winnerUsername: winner?.author?.username || null,
           });
         }
+
+        // Winner earns Burn Rep (competitively earned, one award per challenge)
+        if (winner?.post_id) {
+          const { data: winningPost } = await client
+            .from('social_posts')
+            .select('user_id')
+            .eq('id', winner.post_id)
+            .maybeSingle();
+          if (winningPost?.user_id) {
+            await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: winningPost.user_id,
+                event_type: 'challenge_won',
+                source_type: 'challenge',
+                source_id: existing.id,
+              }),
+            }).catch(() => {});
+          }
+        }
       } catch {
-        // notifications are non-critical
+        // winner/rep/notifications are non-critical
       }
     } else if (body.action === 'cancel') {
       if (existing.status !== 'active') {
@@ -205,7 +240,7 @@ export async function DELETE(req, { params }) {
       return NextResponse.json({ error: 'Challenge not found' }, { status: 404 });
     }
     if (existing.creator_id !== auth.userId) {
-      return NextResponse.json({ error: 'Only the creator can delete this challenge' }, { status: 403 });
+      return NextResponse.json({ error: 'Only the host can delete this challenge' }, { status: 403 });
     }
 
     // Entry posts survive deletion — their challenge context is cleared (SET NULL).

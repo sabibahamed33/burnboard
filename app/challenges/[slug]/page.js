@@ -64,6 +64,8 @@ export default function ChallengeDetailPage() {
   const [showManage, setShowManage] = useState(false);
   const [managing, setManaging] = useState(false);
   const [invitesOpen, setInvitesOpen] = useState(false);
+  const [myVotePostId, setMyVotePostId] = useState(null);
+  const [votingId, setVotingId] = useState(null);
 
   const challenge = data?.challenge || null;
   const meta = TYPE_META[challenge?.challenge_type] || TYPE_META.hot_take;
@@ -95,6 +97,7 @@ export default function ChallengeDetailPage() {
         const entriesJson = await entriesRes.json();
         setEntries(entriesJson.items || []);
         setNextCursor(entriesJson.nextCursor || null);
+        setMyVotePostId(entriesJson.viewerVotePostId || null);
       }
       track('challenge_viewed', { slug });
     } catch {
@@ -126,6 +129,49 @@ export default function ChallengeDetailPage() {
     setToast(text);
     setTimeout(() => setToast(''), 3000);
   }, []);
+
+  // ── Vote for an entry (one active vote per user, switchable) ─
+  const handleVote = useCallback(async (postId) => {
+    if (votingId || !postId) return;
+    if (!authUser) {
+      router.push('/auth');
+      return;
+    }
+    setVotingId(postId);
+    try {
+      const res = await fetch(`/api/challenges/${slug}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_id: postId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(body.error || 'Vote failed');
+        return;
+      }
+      const previous = myVotePostId;
+      setMyVotePostId(postId);
+      setEntries(prev => prev.map(e => {
+        if (e.id === postId) {
+          return {
+            ...e,
+            voteCount: typeof body.votes === 'number' ? body.votes : (e.voteCount || 0) + (previous === postId ? 0 : 1),
+            viewerVoted: true,
+          };
+        }
+        if (e.id === previous) {
+          return { ...e, voteCount: Math.max(0, (e.voteCount || 1) - 1), viewerVoted: false };
+        }
+        return e;
+      }));
+      track('challenge_voted', { slug, postId, switched: !!previous && previous !== postId });
+      showToast(previous && previous !== postId ? 'Vote switched 🔥' : 'Vote counted 🔥');
+    } catch {
+      showToast('Something went wrong');
+    } finally {
+      setVotingId(null);
+    }
+  }, [slug, votingId, authUser, myVotePostId, router, showToast]);
 
   // ── Share (native + clipboard fallback) ────────────────────
   const handleShare = useCallback(async () => {
@@ -369,12 +415,12 @@ export default function ChallengeDetailPage() {
           {isCancelled ? (
             <div className="bg-[#0f0f0f] border border-[#262626] rounded-xl p-3 text-xs text-zinc-400 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
-              This challenge was cancelled by its creator. Entries already posted remain live on BurnBoard.
+              This challenge was cancelled by its host. Entries already posted remain live on BurnBoard.
             </div>
           ) : isEnded ? (
             <div className="bg-[#0f0f0f] border border-[#262626] rounded-xl p-3 text-xs text-zinc-400 flex items-start gap-2">
               <Trophy className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" aria-hidden="true" />
-              Voting is closed. Results below are based on real reactions to entries.
+              Voting is closed. Results below rank real votes first, reactions break ties.
             </div>
           ) : (
             <div className="bg-[#0f0f0f] border border-[#262626] rounded-xl p-3 text-xs text-zinc-400 flex items-start gap-2">
@@ -406,7 +452,7 @@ export default function ChallengeDetailPage() {
             </div>
           )}
 
-          {/* Creator controls */}
+          {/* Host controls */}
           {viewer?.isCreator && (
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
@@ -475,7 +521,7 @@ export default function ChallengeDetailPage() {
           )}
         </div>
 
-        {/* Invite (creator or participant, while live) */}
+        {/* Invite (host or participant, while live) */}
         {canInvite && (
           <section className="bg-[#111] border border-[#222] rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -552,7 +598,7 @@ export default function ChallengeDetailPage() {
                           &ldquo;{entry.text}&rdquo;
                         </p>
                         <p className="text-[11px] font-mono text-zinc-500 mt-1">
-                          {entry.author ? `@${entry.author.username}` : 'Anonymous'} · 🔥 {entry.reactions} reactions
+                          {entry.author ? `@${entry.author.username}` : 'Anonymous'} · 🏆 {entry.votes || 0} votes · 🔥 {entry.reactions} reactions
                         </p>
                       </div>
                       {idx === 0 && (
@@ -564,7 +610,7 @@ export default function ChallengeDetailPage() {
                   </Link>
                 ))}
                 <p className="text-[10px] font-mono text-zinc-600 px-1">
-                  Ranked by real reactions to entries · {formatCount(data.outcome.total_participants)} participants · {formatCount(data.outcome.total_reactions)} total reactions
+                  Ranked by real votes, reactions break ties · {formatCount(data.outcome.total_participants)} participants · {formatCount(data.outcome.total_votes || 0)} votes · {formatCount(data.outcome.total_reactions)} reactions
                 </p>
               </div>
             ) : (
@@ -574,7 +620,7 @@ export default function ChallengeDetailPage() {
                 <p className="text-[11px] text-zinc-600 font-mono">
                   {data.outcome.total_participants === 0
                     ? 'Nobody entered this challenge.'
-                    : `${data.outcome.total_participants} ${data.outcome.total_participants === 1 ? 'person entered' : 'people entered'} but no entries picked up reactions — no winner to declare.`}
+                    : `${data.outcome.total_participants} ${data.outcome.total_participants === 1 ? 'person entered' : 'people entered'} but no entries picked up votes or reactions — no winner to declare.`}
                 </p>
               </div>
             )}
@@ -593,9 +639,50 @@ export default function ChallengeDetailPage() {
 
           {entries.length > 0 ? (
             <div className="space-y-3">
-              {entries.map(item => (
-                <FeedCard key={item.id} item={item} />
-              ))}
+              {entries.map(item => {
+                const isOwn = authUser && item.userId && item.userId === authUser.id;
+                const voted = myVotePostId === item.id;
+                // Signed-out users can tap to reach sign-in; owners of the
+                // entry and closed challenges cannot vote.
+                const votable = isActive && !isOwn;
+                const busy = votingId === item.id;
+                return (
+                  <div key={item.id} className="space-y-0">
+                    <FeedCard item={item} />
+                    <div className="flex items-center gap-2 -mt-2 mb-1 px-1">
+                      <button
+                        onClick={() => handleVote(item.id)}
+                        disabled={!votable || busy}
+                        aria-pressed={voted}
+                        aria-label={voted ? 'Your voted entry' : isOwn ? 'Your entry (no self-voting)' : isActive ? `Vote for this entry (${item.voteCount || 0} votes)` : 'Voting closed'}
+                        title={
+                          !authUser ? 'Sign in to vote'
+                          : isOwn ? 'You cannot vote for your own entry'
+                          : !isActive ? 'Voting is closed'
+                          : voted ? 'Your vote is on this entry'
+                          : 'Vote for this entry (one vote per challenge — tap another entry to switch)'
+                        }
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-mono font-bold transition-all min-h-[36px] disabled:cursor-not-allowed ${
+                          voted
+                            ? 'bg-[#ff4d00] text-black shadow-[0_0_12px_rgba(255,77,0,0.35)]'
+                            : votable
+                              ? 'bg-[#1a1a1a] border border-[#333] text-zinc-300 hover:border-[#ff4d00]/60 hover:text-white'
+                              : 'bg-[#111] border border-[#222] text-zinc-600'
+                        } ${busy ? 'opacity-60' : ''}`}
+                      >
+                        <Trophy className="w-3.5 h-3.5" aria-hidden="true" />
+                        {voted ? 'Voted' : 'Vote'}
+                        <span className="opacity-80">· {item.voteCount || 0}</span>
+                      </button>
+                      {voted && (
+                        <span className="text-[10px] font-mono text-zinc-500">
+                          Your vote counts — tap another entry to switch it.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
               {nextCursor && (
                 <button
                   onClick={loadMoreEntries}

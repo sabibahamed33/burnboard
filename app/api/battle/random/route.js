@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getRequestContext } from '@/lib/routeAuth';
 import { checkRateLimit, ipKey, RATE_LIMITS, getClientIp } from '@/lib/serverRateLimit';
+import { hiddenAuthorIds } from '@/lib/safety';
 import { track } from '@/lib/analytics';
 
 /**
@@ -97,7 +98,22 @@ export async function GET(req) {
       .order('created_at', { ascending: false })
       .limit(150);
 
-    const pool = shuffle(candidates || []);
+    // Block-aware pairing: never serve a matchup featuring a profile the
+    // signed-in viewer blocked/muted (or who blocked them). Unclaimed
+    // profiles (no user_id) are unaffected.
+    const earlyAuth = await getRequestContext(req);
+    let pool = shuffle(candidates || []);
+    if (earlyAuth.userId) {
+      try {
+        const ownerIds = [...new Set(pool.map(p => p.user_id).filter(Boolean))];
+        if (ownerIds.length > 0) {
+          const hidden = await hiddenAuthorIds(earlyAuth.client || supabase, earlyAuth.userId, ownerIds);
+          if (hidden.size > 0) {
+            pool = pool.filter(p => !p.user_id || !hidden.has(p.user_id));
+          }
+        }
+      } catch {}
+    }
     if (pool.length < 2) {
       return NextResponse.json({ empty: true, reason: 'not-enough-fighters', battle: null });
     }

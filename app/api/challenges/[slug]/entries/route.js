@@ -38,8 +38,10 @@ export async function GET(req, { params }) {
     const { client: viewerClient, userId: viewerId } = await getRequestContext(req);
     let items = null;
     let nextCursor = null;
+    let viewerVotePostId = null;
     if (viewerClient && viewerId) {
-      const raw = await getChallengeEntries(challenge.id, { limit, cursor });
+      const raw = await getChallengeEntries(challenge.id, { limit, cursor, viewerId });
+      viewerVotePostId = raw.viewerVotePostId || null;
       const hidden = await hiddenAuthorIds(
         viewerClient,
         viewerId,
@@ -59,6 +61,7 @@ export async function GET(req, { params }) {
       items,
       nextCursor,
       count: items.length,
+      viewerVotePostId,
     });
   } catch (err) {
     console.error('[Challenges] Entries error:', err);

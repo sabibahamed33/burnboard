@@ -8,13 +8,14 @@ import { normalizeQuery, normalizeTag, aggregateTags, extractTags } from '@/lib/
 import { instrumentHandler } from '@/lib/metrics';
 
 /**
- * GET /api/search?q=...&scope=all|people|roasts|communities|topics|hashtags&limit=&offset=
+ * GET /api/search?q=...&scope=all|people|roasts|communities|challenges|topics|hashtags&limit=&offset=
  *
  * Server-side discovery search across entity types. Every scope reads only
  * real rows, respects blocks/mutes (hiddenAuthorIds), moderation state,
  * community visibility, and RLS (session client when signed in).
  * Hashtags are aggregated live from matched content — no stored counts,
- * nothing fabricated.
+ * nothing fabricated. Challenges are public-only by schema; cancelled
+ * challenges never surface.
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
@@ -29,7 +30,7 @@ function getSupabase() {
   return createClient(supabaseUrl, supabaseKey);
 }
 
-const SCOPES = ['all', 'people', 'roasts', 'communities', 'topics', 'hashtags'];
+const SCOPES = ['all', 'people', 'roasts', 'communities', 'challenges', 'topics', 'hashtags'];
 const MAX_LIMIT = 20;
 
 /**
@@ -180,6 +181,36 @@ async function searchRoasts(db, q, userId, limit) {
     .map(({ _score, ...rest }) => rest);
 }
 
+async function searchChallenges(db, q, limit) {
+  const safe = sanitizeLike(q);
+  if (!safe) return [];
+  const like = `%${safe}%`;
+  const { data } = await db
+    .from('challenges')
+    .select('id, slug, title, description, challenge_type, status, ends_at, created_at')
+    .or(`title.ilike.${like},description.ilike.${like}`)
+    .neq('status', 'cancelled')
+    .order('created_at', { ascending: false })
+    .limit(30);
+  const rows = data || [];
+  const lower = q.toLowerCase();
+  return rows
+    .map((c) => {
+      const title = (c.title || '').toLowerCase();
+      let score = 0;
+      if (title === lower) score = 4;
+      else if (title.startsWith(lower)) score = 3;
+      else if (title.includes(lower)) score = 2;
+      else score = 1;
+      // Live challenges rank above ended ones for the same text match.
+      if (c.status === 'active') score += 0.5;
+      return { ...c, _score: score * (1 + freshnessDecay(c.created_at, 72)) };
+    })
+    .sort((a, b) => b._score - a._score)
+    .slice(0, limit)
+    .map(({ _score, ...rest }) => rest);
+}
+
 async function searchTopics(db, q, limit) {
   let query = db.from('topics').select('id, name, slug');
   const safe = sanitizeLike(q);
@@ -269,7 +300,7 @@ async function getHandler(req) {
 
     const q = normalizeQuery(rawQ);
     if (!q && !(scope === 'topics' && !rawQ)) {
-      return NextResponse.json({ success: true, query: '', scope, people: [], roasts: [], communities: [], topics: [], hashtags: { tags: [], posts: [] }, suggestions: [] });
+      return NextResponse.json({ success: true, query: '', scope, people: [], roasts: [], communities: [], challenges: [], topics: [], hashtags: { tags: [], posts: [] }, suggestions: [] });
     }
     if (q.length > 80) {
       return NextResponse.json({ error: 'Query too long' }, { status: 400 });
@@ -279,10 +310,11 @@ async function getHandler(req) {
     const db = sessionClient || anon;
     const want = (s) => scope === 'all' || scope === s;
 
-    const [people, roasts, communitiesRes, topics, hashtags] = await Promise.all([
+    const [people, roasts, communitiesRes, challenges, topics, hashtags] = await Promise.all([
       want('people') ? searchPeople(db, q, userId, limit) : Promise.resolve([]),
       want('roasts') || want('hashtags') ? searchRoasts(db, q, userId, limit) : Promise.resolve([]),
       want('communities') ? searchCommunities({ q, sort: 'newest', limit, offset: 0, userId }) : Promise.resolve([]),
+      want('challenges') ? searchChallenges(db, q, limit) : Promise.resolve([]),
       want('topics') || scope === 'all' ? searchTopics(db, q, scope === 'all' ? 6 : limit) : Promise.resolve([]),
       want('hashtags') ? searchHashtags(db, q, limit) : Promise.resolve({ tags: [], posts: [] }),
     ]);
@@ -297,6 +329,7 @@ async function getHandler(req) {
       people,
       roasts,
       communities,
+      challenges,
       topics,
       hashtags,
       suggestions,
