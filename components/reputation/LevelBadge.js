@@ -1,37 +1,38 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getLevelInfo as getCentralLevelInfo } from '@/lib/reputation/config';
 
-const LEVELS = [
-  { level: 1, name: 'Spark', min_rep: 0, color: '#94a3b8', icon: '✨' },
-  { level: 2, name: 'Ember', min_rep: 50, color: '#fb923c', icon: '🕯️' },
-  { level: 3, name: 'Flame', min_rep: 200, color: '#f97316', icon: '🔥' },
-  { level: 4, name: 'Blaze', min_rep: 500, color: '#ef4444', icon: '🔥' },
-  { level: 5, name: 'Inferno', min_rep: 1000, color: '#dc2626', icon: '🌋' },
-  { level: 6, name: 'Phoenix', min_rep: 2500, color: '#7c3aed', icon: '🐦‍🔥' },
-  { level: 7, name: 'Legend', min_rep: 5000, color: '#eab308', icon: '👑' },
-];
+// Presentation for each level name. Thresholds, names, and progression live
+// in lib/reputation/config.js (the single source of truth) — this file only
+// decides how a level looks.
+const LEVEL_STYLE = {
+  Spark: { color: '#94a3b8', icon: '✨' },
+  Ember: { color: '#fb923c', icon: '🕯️' },
+  Flame: { color: '#f97316', icon: '🔥' },
+  Blaze: { color: '#ef4444', icon: '🔥' },
+  Inferno: { color: '#dc2626', icon: '🌋' },
+  Supernova: { color: '#7c3aed', icon: '💫' },
+  Legend: { color: '#eab308', icon: '👑' },
+};
 
 export function getLevelInfo(reputation) {
-  let currentLevel = LEVELS[0];
-  for (const level of LEVELS) {
-    if (reputation >= level.min_rep) {
-      currentLevel = level;
-    }
-  }
-
-  const currentIndex = LEVELS.indexOf(currentLevel);
-  const nextLevel = currentIndex < LEVELS.length - 1 ? LEVELS[currentIndex + 1] : null;
-
-  const progress = nextLevel
-    ? (reputation - currentLevel.min_rep) / (nextLevel.min_rep - currentLevel.min_rep)
-    : 1;
-
+  const info = getCentralLevelInfo(reputation || 0);
+  const style = LEVEL_STYLE[info.name] || LEVEL_STYLE.Spark;
+  const current = { level: info.level, name: info.name, ...style };
+  const next = info.nextLevel
+    ? {
+        level: info.level + 1,
+        name: info.nextLevel.name,
+        ...(LEVEL_STYLE[info.nextLevel.name] || LEVEL_STYLE.Spark),
+      }
+    : null;
+  const progress = (info.progress || 0) / 100;
   return {
-    current: currentLevel,
-    next: nextLevel,
+    current,
+    next,
     progress: Math.min(progress, 1),
-    toNext: nextLevel ? nextLevel.min_rep - reputation : 0,
+    toNext: info.progressToNext || 0,
   };
 }
 

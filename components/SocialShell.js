@@ -8,6 +8,7 @@ import {
   TrendingUp, Trophy, Calendar, Menu, X, ChevronRight, Users, Sparkles, BarChart3, Gem, BrainCircuit
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+import LevelUpWatcher from './reputation/LevelUpWatcher';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 /**
@@ -213,6 +214,7 @@ export default function SocialShell({ children }) {
       <main className="social-shell-content">
         {children}
       </main>
+      <LevelUpWatcher />
     </div>
   );
 }

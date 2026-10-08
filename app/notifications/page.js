@@ -27,6 +27,8 @@ const TYPE_CONFIG = {
   community_role_changed: { emoji: '🛡️', label: 'Community Role', color: 'text-amber-400' },
   challenge_invite: { emoji: '🎯', label: 'Challenge Invite', color: 'text-[#ff4d00]' },
   challenge_result: { emoji: '🏆', label: 'Challenge Result', color: 'text-amber-400' },
+  level_up:        { emoji: '⚡', label: 'Level Up', color: 'text-[#ff4d00]' },
+  achievement_unlocked: { emoji: '🏆', label: 'Achievement', color: 'text-amber-400' },
   billing:          { emoji: '💳', label: 'Billing', color: 'text-emerald-400' },
 };
 
@@ -40,6 +42,7 @@ const FILTERS = [
   { key: 'battles', label: 'Battles', types: ['battle_invite', 'battle_ready', 'battle_result'] },
   { key: 'communities', label: 'Communities', types: ['community_joined', 'community_role_changed', 'community_join_request', 'community_join_approved'] },
   { key: 'challenges', label: 'Challenges', types: ['challenge_invite', 'challenge_result'] },
+  { key: 'progress', label: 'Progress', types: ['level_up', 'achievement_unlocked', 'milestone', 'creator_milestone'] },
 ];
 
 // ── Time Ago ─────────────────────────────────────────────────

@@ -129,7 +129,7 @@ export async function POST(req) {
     // Only real user ids can follow (anon participant ids fail the
     // UUID/FK constraint — reject with a friendly message, not a 500).
     if (!UUID_RE.test(viewer_id)) {
-      return NextResponse.json({ error: 'Sign in to follow creators.' }, { status: 401 });
+      return NextResponse.json({ error: 'Sign in to follow users.' }, { status: 401 });
     }
 
     // Writes require the session client: RLS enforces
@@ -137,7 +137,7 @@ export async function POST(req) {
     // never insert/delete (RLS would deny it). No session → no follow.
     const writeClient = session?.client && session.userId === viewer_id ? session.client : null;
     if (!writeClient) {
-      return NextResponse.json({ error: 'Sign in to follow creators.' }, { status: 401 });
+      return NextResponse.json({ error: 'Sign in to follow users.' }, { status: 401 });
     }
 
     // Prevent self-follow
@@ -230,6 +230,21 @@ export async function POST(req) {
           notifyNewFollower({
             followerId: viewer_id,
             followedUserId: target_user_id,
+          }).catch(() => {});
+
+          // Universal XP: the follower connected (+2), the followed user
+          // gained a follower (+5). Fire-and-forget; the award route
+          // enforces daily caps and idempotency.
+          const base = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+          fetch(`${base}/api/reputation/award`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: viewer_id, event_type: 'follow', source_type: 'user', source_id: target_user_id }),
+          }).catch(() => {});
+          fetch(`${base}/api/reputation/award`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: target_user_id, event_type: 'follow_received', source_type: 'user', source_id: viewer_id }),
           }).catch(() => {});
         }
       }
