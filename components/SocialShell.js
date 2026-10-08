@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Flame, Home, Compass, Plus, Swords, Bell, User, Search,
-  TrendingUp, Trophy, Calendar, Menu, X, ChevronRight, Users, Sparkles, BarChart3, Gem, BrainCircuit
+  TrendingUp, Trophy, Calendar, Menu, X, ChevronRight, Users, Sparkles, BarChart3, Gem, BrainCircuit, MessageCircle
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+import UnreadBadge from './dm/UnreadBadge';
 import LevelUpWatcher from './reputation/LevelUpWatcher';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
 ];
 
 const SECONDARY_ITEMS = [
+  { key: 'messages', label: 'Messages', icon: MessageCircle, href: '/messages', badge: true },
   { key: 'communities', label: 'Communities', icon: Users, href: '/c' },
   { key: 'challenges', label: 'Challenges', icon: Sparkles, href: '/challenges' },
   { key: 'weekly', label: 'Weekly Recap', icon: Calendar, href: '/weekly' },
@@ -140,6 +142,7 @@ export default function SocialShell({ children }) {
               >
                 <Icon className={`w-4 h-4 ${active ? 'text-[#ff4d00]' : ''}`} />
                 <span>{item.label}</span>
+                {item.badge && user && <UnreadBadge />}
               </Link>
             );
           })}

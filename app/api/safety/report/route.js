@@ -5,7 +5,8 @@
  *
  * Body:
  *   targetType: 'roast' | 'hot_seat' | 'battle' | 'profile' | 'user' |
- *               'social_post' | 'comment' | 'challenge' | 'community'
+ *               'social_post' | 'comment' | 'challenge' | 'community' |
+ *               'dm_message'
  *   targetId: UUID
  *   category: harassment | threat | hate | spam | impersonation |
  *             non_consensual | privacy_violation | sexual_content |
@@ -22,7 +23,7 @@ import { createReport } from '@/lib/moderationService';
 import { REPORT_REASONS, canUserPerform } from '@/lib/safety';
 import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
 
-const VALID_TARGET_TYPES = ['roast', 'hot_seat', 'battle', 'profile', 'user', 'social_post', 'comment', 'challenge', 'community'];
+const VALID_TARGET_TYPES = ['roast', 'hot_seat', 'battle', 'profile', 'user', 'social_post', 'comment', 'challenge', 'community', 'dm_message'];
 const VALID_CATEGORIES = REPORT_REASONS.map((r) => r.id);
 
 export async function POST(request) {

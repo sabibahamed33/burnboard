@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowBigUp, MessageSquare, MoreHorizontal, BarChart3, MinusCircle, EyeOff, Ban, Sparkles, Gift, Pencil, Trash2 } from 'lucide-react';
+import { ArrowBigUp, MessageSquare, MoreHorizontal, BarChart3, MinusCircle, EyeOff, Ban, Sparkles, Gift, Pencil, Trash2, Send } from 'lucide-react';
 import Avatar from '@/components/ui/Avatar';
 import Badge from '@/components/ui/Badge';
 import { ReactionSummary, getParticipantId } from './ReactionBar';
@@ -11,6 +11,7 @@ import PollCard from './PollCard';
 import SafetyActions from '@/components/safety/SafetyActions';
 import ShareButton from '@/components/growth/ShareButton';
 import TipModal from '@/components/monetization/TipModal';
+import SendViaMessageModal from '@/components/dm/SendViaMessageModal';
 import CommentSheet from '@/components/comments/CommentSheet';
 import PhotoMetaChips from './PhotoMetaChips';
 import SaveButton from './SaveButton';
@@ -136,6 +137,7 @@ export default function FeedCard({
   const [upvoteCount, setUpvoteCount] = useState(item.upvotes || 0);
   const [showMenu, setShowMenu] = useState(false);
   const [showTip, setShowTip] = useState(false);
+  const [showSend, setShowSend] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [reactions, setReactions] = useState(item.reactions || {});
   const [participantReaction, setParticipantReaction] = useState(null);
@@ -394,6 +396,19 @@ export default function FeedCard({
                   Support this user
                 </button>
               )}
+              {/* Private share — send this post in a DM (server re-validates) */}
+              {item.id && item.type !== 'roast' && (
+                <button
+                  onClick={() => {
+                    setShowMenu(false);
+                    setShowSend(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-zinc-300 hover:bg-[#ff4d00]/10 hover:text-[#ff4d00] transition-colors"
+                >
+                  <Send className="w-3.5 h-3.5 shrink-0" />
+                  Send via message
+                </button>
+              )}
               {onRemoveFromCommunity && (
                 <button
                   onClick={() => {
@@ -422,6 +437,15 @@ export default function FeedCard({
         creatorId={item.userId}
         creatorName={item.author?.username || item.author?.displayName}
       />
+
+      {/* Private share — send this post in a DM */}
+      {showSend && (
+        <SendViaMessageModal
+          sharedKind="social_post"
+          sharedId={item.id}
+          onClose={() => setShowSend(false)}
+        />
+      )}
 
       {/* Conversation sheet — join without leaving the feed */}
       <CommentSheet

@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Flame, ArrowLeft, Calendar, Loader2, Settings, Users, UserCheck,
-  Globe, Pin, BarChart3
+  Globe, Pin, BarChart3, MessageCircle
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import Avatar from '@/components/ui/Avatar';
@@ -362,6 +362,14 @@ export default function UserProfilePage() {
                     initialFollowerCount={stats.followerCount}
                     onFollowChange={handleFollowChange}
                   />
+                  <Link
+                    href={`/messages?user=${profile.id}`}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-[#1a1a1a] border border-[#333] hover:border-[#ff4d00]/50 text-zinc-300 hover:text-white text-xs font-mono font-bold rounded-xl transition-all"
+                    aria-label={`Message @${profile.username}`}
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    Message
+                  </Link>
                   <ProfileSafetyActions
                     targetUserId={profile.id}
                     targetUsername={profile.username}
