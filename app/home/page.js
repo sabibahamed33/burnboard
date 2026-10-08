@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Flame, TrendingUp, Clock, Loader2, Zap, Trophy, RefreshCw, UserPlus } from 'lucide-react';
+import { Flame, TrendingUp, Clock, Loader2, Zap, Trophy, RefreshCw, UserPlus, PenLine, Camera, Swords, Sparkles } from 'lucide-react';
 import { FeedCard } from '@/components/feed';
 import InterestPicker from '@/components/feed/InterestPicker';
 import ForYouRails from '@/components/feed/ForYouRails';
@@ -10,6 +10,8 @@ import PeopleYouMayLike from '@/components/feed/PeopleYouMayLike';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import TodayOnBurnBoard from '@/components/feed/TodayOnBurnBoard';
 import TrendingSidebar from '@/components/feed/TrendingSidebar';
+import NotificationBell from '@/components/NotificationBell';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { track } from '@/lib/analytics';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { subscribeRealtime } from '@/lib/realtime';
@@ -352,42 +354,80 @@ export default function SocialHomePage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-[#0a0a0a] pb-28 font-sans text-white sm:pb-16">
       <div className="max-w-6xl mx-auto flex">
         {/* ═══ Main Feed Column ═══ */}
-        <div className="flex-1 min-w-0 max-w-2xl mx-auto lg:mx-0 lg:max-w-none px-4 sm:px-6 py-6 space-y-5">
-          {/* Header */}
-          <header className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Flame className="w-6 h-6 text-[#ff4d00] fill-[#ff4d00]" />
-                <h1 className="text-lg font-black text-white uppercase tracking-wider font-mono">
-                  FEED
-                </h1>
-              </div>
+        <div className="flex-1 min-w-0 max-w-2xl mx-auto lg:mx-0 lg:max-w-none px-4 sm:px-6 pt-4 pb-6 space-y-5">
+          {/* Brand header — compact; shell owns nav */}
+          <header className="flex min-h-[44px] items-center justify-between">
+            <Link href="/" className="flex items-center gap-1.5" aria-label="BurnBoard home">
+              <Flame className="h-5 w-5 fill-[#ff4d00] text-[#ff4d00]" />
+              <span className="text-[15px] font-black tracking-wide text-white">
+                BURNBOARD
+              </span>
+            </Link>
+            <div className="flex items-center gap-1">
+              <NotificationBell />
               <button
                 onClick={() => { resetFeedState(); fetchFeed(true); }}
                 disabled={loading}
-                className="p-2 rounded-xl hover:bg-[#1a1a1a] transition-colors text-zinc-400 hover:text-white"
+                className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
                 aria-label="Refresh feed"
               >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
             </div>
+          </header>
 
+          {/* Context */}
+          <div className="space-y-1">
+            <h1 className="text-[22px] font-black leading-none tracking-tight text-white">
+              Home
+            </h1>
+            <p className="text-xs text-zinc-500">
+              {activeTab === 'following'
+                ? 'Latest from people you follow, in order.'
+                : activeTab === 'trending'
+                  ? 'What is gaining attention right now.'
+                  : 'Picked for you from across BurnBoard.'}
+            </p>
+          </div>
+
+          {/* Quick composer — entry points only; creation lives in /create */}
+          <Link
+            href="/create"
+            className="flex min-h-[56px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 backdrop-blur-xl transition-all hover:border-[#ff4d00]/40 active:scale-[0.99]"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ff4d00]/15 text-[#ff4d00]">
+              <PenLine className="h-4 w-4" />
+            </span>
+            <span className="flex-1 truncate text-sm text-zinc-500">
+              What are you burning about?
+            </span>
+            <span className="flex shrink-0 items-center gap-1">
+              <span title="Photo" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Camera className="h-4 w-4" /></span>
+              <span title="Battle" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Swords className="h-4 w-4" /></span>
+              <span title="Challenge" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Sparkles className="h-4 w-4" /></span>
+            </span>
+          </Link>
+
+          <div className="space-y-4">
             {/* Feed Tabs — Following is only for signed-in users and stays
                 distinctly chronological (never silently algorithmic). */}
-            <div className="flex items-center gap-1 bg-[#111] p-1 rounded-xl border border-[#222]">
+            <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-white/[0.03] p-1" role="tablist" aria-label="Feed">
               {FEED_TABS.filter(tab => tab.key !== 'following' || signedIn).map(tab => {
                 const Icon = tab.icon;
+                const active = activeTab === tab.key;
                 return (
                   <button
                     key={tab.key}
+                    role="tab"
+                    aria-selected={active}
                     onClick={() => handleTabChange(tab.key)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-xs font-mono font-bold transition-all ${
-                      activeTab === tab.key
-                        ? 'bg-[#ff4d00] text-black'
-                        : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
+                    className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${
+                      active
+                        ? 'bg-[#ff4d00] text-black shadow-[0_0_16px_rgba(255,77,0,0.35)]'
+                        : 'text-zinc-400 hover:bg-white/5 hover:text-white'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5" />
@@ -399,17 +439,20 @@ export default function SocialHomePage() {
 
             {/* Trending Window Tabs (only when on trending tab) */}
             {activeTab === 'trending' && (
-              <div className="flex items-center gap-1 bg-[#111] p-1 rounded-xl border border-[#222]">
+              <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-white/[0.03] p-1" role="tablist" aria-label="Trending window">
                 {TRENDING_WINDOWS.map(w => {
                   const Icon = w.icon;
+                  const active = trendingWindow === w.key;
                   return (
                       <button
                         key={w.key}
+                        role="tab"
+                        aria-selected={active}
                         onClick={() => handleWindowChange(w.key)}
-                      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-mono font-bold transition-all ${
-                        trendingWindow === w.key
-                          ? 'bg-[#1a1a1a] text-white border border-[#333]'
-                          : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
+                      className={`flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-xl px-3 text-[11px] font-bold transition-all active:scale-95 ${
+                        active
+                          ? 'border border-white/15 bg-white/10 text-white'
+                          : 'text-zinc-400 hover:bg-white/5 hover:text-white'
                       }`}
                     >
                       <Icon className="w-3 h-3" />
@@ -419,7 +462,7 @@ export default function SocialHomePage() {
                 })}
               </div>
             )}
-          </header>
+          </div>
 
           {/* ═══ Feed Content ═══ */}
           
@@ -434,11 +477,12 @@ export default function SocialHomePage() {
 
           {/* Error State — friendly copy only; technical details stay in logs */}
           {error && !loading && (
-            <div className="bg-[#111] border border-[#333] rounded-2xl p-6 text-center space-y-3">
-              <p className="text-sm text-zinc-200 font-bold">Couldn&apos;t load your feed.</p>
+            <div className="space-y-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center">
+              <p className="text-sm font-bold text-zinc-200">Your feed couldn&apos;t load.</p>
+              <p className="text-xs text-zinc-500">Check your connection and try again.</p>
               <button
                 onClick={() => { resetFeedState(); fetchFeed(true); }}
-                className="px-5 py-2.5 bg-[#ff4d00] text-black text-xs font-mono font-bold rounded-xl hover:bg-[#ff6622] transition-colors"
+                className="inline-flex min-h-[44px] items-center px-5 bg-[#ff4d00] text-black text-xs font-black uppercase tracking-wider rounded-2xl hover:bg-[#ff6622] transition-all active:scale-95"
               >
                 Try again
               </button>
@@ -522,7 +566,11 @@ export default function SocialHomePage() {
               )}
 
               {items.map(item => (
-                <React.Fragment key={`${item.type}-${item.id}`}>
+                <ErrorBoundary
+                  key={`${item.type}-${item.id}`}
+                  title="This post couldn't load"
+                  message="The rest of your feed still works."
+                >
                 <FeedCard
                   item={item}
                   onReaction={handleReaction}
@@ -540,7 +588,7 @@ export default function SocialHomePage() {
                     {' '}rel={item.debug.factors?.following}+{item.debug.factors?.creator} pop={item.debug.factors?.popularity} fresh={item.debug.factors?.freshness} qual={item.debug.factors?.creatorQuality} vel={item.debug.factors?.velocity} boost={item.debug.factors?.launchBoost}
                   </p>
                 )}
-                </React.Fragment>
+                </ErrorBoundary>
               ))}
             </div>
           )}
@@ -569,7 +617,7 @@ export default function SocialHomePage() {
 
         {/* ═══ Desktop Right Sidebar ═══ */}
         <aside className="hidden xl:block w-80 shrink-0 pl-8 pr-4 py-6 space-y-6">
-          {/* Personalized creator discovery (signed-in viewers only) */}
+          {/* Personalized user discovery (signed-in viewers only) */}
           <PeopleYouMayLike signedIn={signedIn} />
           <TrendingSidebar />
         </aside>

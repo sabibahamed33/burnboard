@@ -87,7 +87,7 @@ function getDetailHref(item) {
 }
 
 // Split text into plain spans + navigable #hashtag / @mention links.
-// Keeps the discovery graph alive: roast → hashtag → search → creators.
+// Keeps the discovery graph alive: roast → hashtag → search → people.
 function renderRichText(text) {
   if (!text) return null;
   const parts = String(text).split(/(#[\p{L}\p{N}_]{2,40}|@[A-Za-z0-9_]{3,20})/gu);
@@ -151,6 +151,7 @@ export default function FeedCard({
   const isEditablePost = item.type !== 'roast' && item.type !== 'poll';
 
   const typeConfig = CONTENT_TYPE_CONFIG[item.type] || CONTENT_TYPE_CONFIG.roast;
+  const isRoast = item.type === 'roast';
   const platformBadge = item.author?.platform ? getPlatformBadge(item.author.platform) : null;
 
   // Fetch reaction state for this item (cached, abortable, never after unmount)
@@ -274,9 +275,14 @@ export default function FeedCard({
 
   return (
     <article
-      className={`feed-card bg-[#111] border border-[#222] hover:border-[#2d2d2d] rounded-2xl transition-all duration-200 ${className}`}
+      className={`feed-card overflow-hidden rounded-[20px] border bg-[#101012] transition-all duration-200 hover:shadow-[0_8px_32px_rgba(0,0,0,0.45)] ${isRoast ? 'border-[#ff4d00]/15 hover:border-[#ff4d00]/35' : 'border-white/10 hover:border-white/20'} ${className}`}
       aria-label={`${typeConfig.label} by ${item.author?.username || 'Anonymous'}`}
     >
+      {/* Roast accent — a restrained top glow keeps roasting identity visible
+          without turning the feed into a target-roasting app. */}
+      {isRoast && (
+        <div className="h-[3px] w-full bg-gradient-to-r from-transparent via-[#ff4d00]/60 to-transparent" aria-hidden="true" />
+      )}
       {/* Header: Author + Timestamp */}
       <div className="flex items-center justify-between p-4 pb-0">
         <div className="flex items-center gap-3 min-w-0">
@@ -320,7 +326,7 @@ export default function FeedCard({
             <MoreHorizontal className="w-4 h-4" />
           </button>
           {showMenu && (
-            <div className="absolute right-0 top-full mt-1 w-52 bg-[#1a1a1a] border border-[#333] rounded-xl shadow-2xl z-10 overflow-hidden">
+            <div className="absolute right-0 top-full mt-1 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#161618]/95 shadow-2xl backdrop-blur-xl z-10">
               {/* Owner controls — server re-verifies ownership */}
               {isOwner && item.userId && item.type !== 'roast' && (
                 <>
@@ -518,7 +524,7 @@ export default function FeedCard({
 
         {/* Photo */}
         {item.mediaUrl && (
-          <div className="mt-3 rounded-xl overflow-hidden">
+          <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
             <img src={item.mediaUrl} alt="Post image" className="feed-media w-full max-h-96" loading="lazy" decoding="async" />
           </div>
         )}
@@ -536,7 +542,7 @@ export default function FeedCard({
 
       {/* Interaction Bar — user permissions gate each control */}
       <div className="px-4 pb-4">
-        <div className="flex items-center justify-between pt-3 border-t border-[#1a1a1a]">
+        <div className="flex items-center justify-between pt-3 border-t border-white/5">
           {/* Upvote */}
           <button
             onClick={handleUpvote}
