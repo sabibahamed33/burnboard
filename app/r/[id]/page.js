@@ -26,6 +26,7 @@ export async function generateMetadata({ params }) {
       .from('roasts')
       .select('*, profiles!inner(username, platform, bio)')
       .eq('id', id)
+      .eq('is_hidden', false)
       .single();
 
     if (!roast) {
@@ -79,7 +80,8 @@ export default async function RoastDetailPage({ params }) {
     );
   }
 
-  // Fetch the roast with profile data
+  // Fetch the roast with profile data (hidden/moderated roasts stay
+  // invisible here exactly as in feeds — RLS is the backstop).
   let roast = null;
   try {
     const { data } = await supabase
@@ -89,6 +91,7 @@ export default async function RoastDetailPage({ params }) {
         profiles!inner(id, username, platform, avatar_letter, avatar_color, tagline, bio)
       `)
       .eq('id', id)
+      .eq('is_hidden', false)
       .single();
     roast = data;
   } catch (err) {

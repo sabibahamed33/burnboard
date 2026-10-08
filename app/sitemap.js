@@ -35,7 +35,7 @@ export default async function sitemap() {
 
   const all = [...staticRoutes];
 
-  // Public creator profiles (RLS excludes banned users).
+  // Public user profiles (RLS excludes banned users).
   try {
     const { data: profiles } = await supabase
       .from('user_profiles')

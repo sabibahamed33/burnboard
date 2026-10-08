@@ -16,9 +16,11 @@ export default function robots() {
           '/admin/',
           '/auth',
           '/auth/',
-          '/creator',
+          '/creator', // legacy private alias route — never indexed
           '/insights',
           '/settings',
+          '/messages',
+          '/messages/',
           '/notifications',
           '/s/',
         ],

@@ -1,17 +1,18 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Flame } from 'lucide-react';
+import { ArrowLeft, Flame, Share2 } from 'lucide-react';
 import { FeedCard } from '@/components/feed';
-import ShareButton from '@/components/growth/ShareButton';
+import ShareSheet from '@/components/growth/ShareSheet';
 
 /**
  * Public landing for a shared modern UGC post (social_posts).
- * Content-first: the visitor sees the actual content + creator identity,
+ * Content-first: the visitor sees the actual content + author identity,
  * with a non-deceptive "join" option afterwards — never a forced login wall.
  */
 export default function UgcPostLanding({ post }) {
+  const [sheetOpen, setSheetOpen] = useState(false);
   const author = post.user_profiles?.[0] || post.user_profiles;
   const item = {
     id: post.id,
@@ -52,15 +53,25 @@ export default function UgcPostLanding({ post }) {
             <span>Back to Feed</span>
           </Link>
           {!sharingOff && (
-            <ShareButton
-              resourceType="social_post"
-              resourceId={post.id}
-              url={typeof window !== 'undefined' ? window.location.href : `https://burnboard.app/post/${post.id}`}
-              title="🔥 BurnBoard"
-              text={`"${post.content_text || ''}" — via BurnBoard`}
-              variant="ghost"
-              label="Share"
-            />
+            <>
+              <button
+                onClick={() => setSheetOpen(true)}
+                aria-label="Share this post"
+                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-xs font-bold text-zinc-300 transition-all hover:border-[#ff4d00]/40 hover:text-white"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+                Share
+              </button>
+              <ShareSheet
+                open={sheetOpen}
+                onClose={() => setSheetOpen(false)}
+                resourceType="social_post"
+                resourceId={post.id}
+                url={typeof window !== 'undefined' ? window.location.href : `https://burnboard.app/post/${post.id}`}
+                title="🔥 BurnBoard"
+                text={`"${post.content_text || ''}" — via BurnBoard`}
+              />
+            </>
           )}
         </div>
 
