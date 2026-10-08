@@ -5,7 +5,7 @@ import { recommendCreators } from '@/lib/reco/discovery';
 /**
  * GET /api/recommendations/creators?limit=6
  *
- * "People You May Like" — creator discovery rail.
+ * "People You May Like" — user discovery rail (path kept for compatibility).
  * Auth required (personalization needs a real viewer). Based only on
  * legitimate signals: shared community memberships, friend-of-friend
  * follows, and the viewer's own engagement affinity. Blocks/mutes are
