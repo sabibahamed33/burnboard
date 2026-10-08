@@ -34,11 +34,21 @@ const VISIBILITY_OPTIONS = [
 /** Downscale + JPEG re-encode: strips EXIF/GPS and keeps uploads light. */
 function processImage(file) {
   return new Promise((resolve, reject) => {
+    // Data-saver / low-memory devices get a lighter encode (still sharp on
+    // phone screens). Respects the OS data-saving signal where available.
+    let quality = 0.85;
+    let maxDim = MAX_DIM;
+    try {
+      if (navigator?.connection?.saveData) {
+        quality = 0.7;
+        maxDim = 1200;
+      }
+    } catch {}
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       try {
-        const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
         const w = Math.max(1, Math.round(img.width * scale));
         const h = Math.max(1, Math.round(img.height * scale));
         const canvas = document.createElement('canvas');
@@ -56,7 +66,7 @@ function processImage(file) {
             resolve({ blob, previewUrl: URL.createObjectURL(blob), width: w, height: h });
           },
           'image/jpeg',
-          0.85
+          quality
         );
       } catch (e) {
         URL.revokeObjectURL(url);

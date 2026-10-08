@@ -357,6 +357,21 @@
 /* ── Responsive safety: never allow horizontal overflow ── */
 img, video, canvas { max-width: 100%; height: auto; }
 
+/* ── Feed scroll performance: skip offscreen card rendering ──
+   content-visibility keeps ranking/order/DOM intact while the browser
+   skips layout+paint for far-offscreen cards. contain-intrinsic-size
+   reserves space so scrollbars stay stable (no layout shift). */
+.feed-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px;
+}
+/* Media never causes layout shift: aspect reserved, cover crop. */
+.feed-media {
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #141414;
+}
+
 /* ── Reduced motion: disable shimmer / lift effects ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

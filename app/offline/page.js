@@ -12,6 +12,15 @@ export default function OfflinePage() {
       const count = parseInt(localStorage.getItem('burnboard_profile_count') || '0', 10);
       setProfileCount(count);
     } catch {}
+    // Recover automatically when the connection returns — no blind reload
+    // loops: only navigate when actually back online.
+    const goOnline = () => {
+      try {
+        if (navigator.onLine) window.location.href = '/';
+      } catch {}
+    };
+    window.addEventListener('online', goOnline);
+    return () => window.removeEventListener('online', goOnline);
   }, []);
 
   return (
@@ -42,6 +51,10 @@ export default function OfflinePage() {
       >
         Retry 🔥
       </button>
+
+      <a href="/" className="text-xs text-zinc-500 underline underline-offset-4 hover:text-zinc-300">
+        Back to home
+      </a>
 
       <div className="text-[10px] text-zinc-600 font-mono mt-8">
         BURNBOARD © 2025 — No AI. Just Offline Humans.

@@ -3,6 +3,14 @@ import { Analytics } from '@vercel/analytics/react';
 import LocaleProvider from '@/components/LocaleProvider';
 import SocialShell from '@/components/SocialShell';
 import ReferralLinkProbe from '@/components/growth/ReferralLinkProbe';
+import { ServiceWorkerRegistrar, ConnectionBanner } from '@/components/pwa/ServiceWorker';
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#ff4d00',
+};
 
 export const metadata = {
   metadataBase: new URL('https://burnboard.app'),
@@ -98,6 +106,10 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" className="dark">
       <head>
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
@@ -109,10 +121,12 @@ export default function RootLayout({ children }) {
       </head>
       <body className="bg-[#0a0a0a] text-[#f0f0f0] min-h-screen font-sans selection:bg-[#ff4d00] selection:text-white">
         <LocaleProvider>
+          <ConnectionBanner />
           <SocialShell>
             {children}
           </SocialShell>
         </LocaleProvider>
+        <ServiceWorkerRegistrar />
         <ReferralLinkProbe />
         <Analytics />
       </body>

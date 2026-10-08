@@ -73,6 +73,9 @@ export default function SearchPage() {
   // Stale-response guard: a slower earlier request must never overwrite
   // newer results (fast repeated searches).
   const seqRef = useRef(0);
+  // In-flight request cancellation (bandwidth + race protection).
+  const abortRef = useRef(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const activeTab = TABS.find((t) => t.key === tab) || TABS[0];
   const trimmed = debouncedQuery.trim();
@@ -123,18 +126,23 @@ export default function SearchPage() {
   const runSearch = useCallback(async (q, scope) => {
     const seq = seqRef.current + 1;
     seqRef.current = seq;
+    // Cancel the previous in-flight request so slow networks can't
+    // overwrite newer results (race protection + less bandwidth).
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&scope=${scope}&limit=12`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&scope=${scope}&limit=12`, { signal: controller.signal });
       const data = await res.json().catch(() => ({}));
       if (seq !== seqRef.current) return; // stale — a newer search is in flight
       if (!res.ok || data.error || !data.success) {
         throw new Error(data.error || 'Search failed');
       }
       setResults(data);
-    } catch {
-      if (seq !== seqRef.current) return;
+    } catch (err) {
+      if (err?.name === 'AbortError' || seq !== seqRef.current) return;
       setResults(null);
       setError('Search is unavailable right now.');
     } finally {

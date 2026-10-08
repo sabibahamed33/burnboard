@@ -274,7 +274,7 @@ export default function FeedCard({
 
   return (
     <article
-      className={`bg-[#111] border border-[#222] hover:border-[#2d2d2d] rounded-2xl transition-all duration-200 ${className}`}
+      className={`feed-card bg-[#111] border border-[#222] hover:border-[#2d2d2d] rounded-2xl transition-all duration-200 ${className}`}
       aria-label={`${typeConfig.label} by ${item.author?.username || 'Anonymous'}`}
     >
       {/* Header: Author + Timestamp */}
@@ -519,7 +519,7 @@ export default function FeedCard({
         {/* Photo */}
         {item.mediaUrl && (
           <div className="mt-3 rounded-xl overflow-hidden">
-            <img src={item.mediaUrl} alt="Post image" className="w-full max-h-96 object-cover" loading="lazy" />
+            <img src={item.mediaUrl} alt="Post image" className="feed-media w-full max-h-96" loading="lazy" decoding="async" />
           </div>
         )}
 
