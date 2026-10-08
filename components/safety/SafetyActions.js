@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Flag, UserCheck, UserX, VolumeX, Volume2, Loader2 } from 'lucide-react';
+import { Flag, UserCheck, UserX, VolumeX, Volume2, Loader2, EyeOff } from 'lucide-react';
 import ReportModal from './ReportModal';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
@@ -130,6 +130,30 @@ export default function SafetyActions({ item, onReport, onMenuClose }) {
   const isBlocked = !!relationship?.viewer_blocks_other;
   const isMuted = !!relationship?.viewer_mutes_other;
 
+  const hideItem = useCallback(async () => {
+    if (busy || !item?.id) return;
+    setBusy('hide');
+    setMessage('');
+    try {
+      const contentType = item?.type === 'roast' ? 'roast' : 'social_post';
+      const res = await fetch('/api/feed/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content_type: contentType, content_id: item.id, action: 'hide' }),
+      });
+      if (!res.ok) {
+        setMessage('Could not hide — try again');
+      } else {
+        setMessage('Hidden — you will see less like this');
+        onMenuClose?.();
+      }
+    } catch {
+      setMessage('Network error');
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, item?.id, item?.type, onMenuClose]);
+
   return (
     <>
       {/* Report */}
@@ -140,6 +164,19 @@ export default function SafetyActions({ item, onReport, onMenuClose }) {
         <Flag className="w-3.5 h-3.5" />
         Report
       </button>
+
+      {/* Hide / Not interested (viewer-only, silent) */}
+      {item?.id && (item?.type === 'roast' || item?.type === 'social_post') && (
+        <button
+          onClick={hideItem}
+          disabled={busy === 'hide'}
+          className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-zinc-300 hover:bg-[#1a1a1a] transition-colors"
+          aria-label="Hide this post"
+        >
+          {busy === 'hide' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <EyeOff className="w-3.5 h-3.5" />}
+          Hide · Not interested
+        </button>
+      )}
 
       {canShowUserActions && (
         <>

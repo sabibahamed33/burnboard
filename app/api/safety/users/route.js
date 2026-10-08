@@ -22,6 +22,27 @@ import {
 
 const VALID_RESTRICTION_TYPES = ['post', 'comment', 'community_create', 'community_join', 'challenge_create', 'invite', 'battle', 'report', 'all'];
 
+/**
+ * GET /api/safety/users?ids=a,b,c — safe public username lookup for the
+ * signed-in USER's own block/mute lists. Returns only id + username +
+ * display_name (never email, phone, or private fields).
+ */
+export async function GET(request) {
+  try {
+    const auth = await getRequestContext(request);
+    if (!auth.client || !auth.userId) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
+    }
+    const { searchParams } = new URL(request.url);
+    const ids = (searchParams.get('ids') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
+    if (!ids.length) return NextResponse.json({ users: [] });
+    const { data } = await auth.client.from('user_profiles').select('id, username, display_name').in('id', ids);
+    return NextResponse.json({ users: data || [] });
+  } catch {
+    return NextResponse.json({ users: [] });
+  }
+}
+
 export async function POST(request) {
   try {
     const auth = await getRequestContext(request);

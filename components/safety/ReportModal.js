@@ -1,36 +1,21 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Loader2, Flag, X } from 'lucide-react';
+import { Loader2, Flag, X, ChevronLeft, Check } from 'lucide-react';
+import { reasonsForTarget } from '@/lib/safety';
 
 /**
- * ReportModal — self-contained content report flow.
+ * ReportModal — premium Liquid Glass universal report flow (USER-only).
  *
- * Opens a bottom-sheet on mobile / centered modal on desktop. Posts a real
- * report record to /api/safety/report (server-validated, rate-limited,
- * duplicate-safe). Reporter identity never leaves the server.
+ * Steps: Report → Why → Context → Submit → Confirmation.
+ * Per-target reason subsets; no internal moderation terminology.
+ * Mobile-first bottom sheet, desktop centered dialog, accessible.
  *
- * Props:
- *   - targetType: 'roast' | 'social_post' | 'comment' | 'user' | ...
- *   - targetId: string
- *   - onClose: fn
+ * Props: targetType, targetId, onClose
  */
-
-const REASONS = [
-  { id: 'harassment', label: 'Harassment or bullying' },
-  { id: 'hate', label: 'Hateful or abusive content' },
-  { id: 'threat', label: 'Threats of violence' },
-  { id: 'spam', label: 'Spam or scam' },
-  { id: 'impersonation', label: 'Impersonation' },
-  { id: 'non_consensual', label: 'Targeting without consent' },
-  { id: 'privacy_violation', label: 'Private info shared' },
-  { id: 'sexual_content', label: 'Sexually explicit content' },
-  { id: 'self_harm', label: 'Self-harm concern' },
-  { id: 'illegal', label: 'Illegal content' },
-  { id: 'other', label: 'Something else' },
-];
-
 export default function ReportModal({ targetType, targetId, onClose }) {
+  const reasons = reasonsForTarget(targetType);
+  const [step, setStep] = useState('reason'); // reason | context | done
   const [category, setCategory] = useState(null);
   const [context, setContext] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -52,105 +37,156 @@ export default function ReportModal({ targetType, targetId, onClose }) {
           context: context.trim() ? context.trim().slice(0, 500) : null,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || 'Could not submit report. Try again later.');
+        setError(data.error || 'Something went wrong. Please try again.');
         setSubmitting(false);
         return;
       }
       setDone(true);
+      setStep('done');
     } catch {
-      setError('Network error — try again.');
+      setError('Network error — please try again.');
       setSubmitting(false);
     }
   };
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center"
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Report content"
     >
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-[#111] border-t sm:border border-[#222] sm:rounded-2xl max-h-[85vh] overflow-y-auto animate-slide-up">
-        <div className="flex items-center justify-between p-4 border-b border-[#222] sticky top-0 bg-[#111]">
-          <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-            <Flag className="w-4 h-4 text-red-400" />
+      <div
+        className="relative w-full sm:max-w-md overflow-hidden rounded-t-3xl sm:rounded-3xl border border-white/10 bg-[#121214]/90 backdrop-blur-xl shadow-2xl max-h-[88vh] overflow-y-auto"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 sticky top-0 bg-[#121214]/90 backdrop-blur-xl z-10">
+          <h3 className="text-sm font-extrabold text-white tracking-wide flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-red-500/15 border border-red-500/30">
+              <Flag className="h-3.5 w-3.5 text-red-400" />
+            </span>
             Report
           </h3>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-[#1a1a1a] text-zinc-400 hover:text-white"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10"
             aria-label="Close report dialog"
           >
-            <X className="w-4 h-4" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
+        {/* Progress */}
+        {!done && (
+          <div className="px-5 pb-1">
+            <div className="flex gap-1.5" aria-hidden="true">
+              {['reason', 'context'].map((s) => (
+                <div
+                  key={s}
+                  className={`h-1 flex-1 rounded-full ${
+                    (s === 'reason' && (step === 'reason' || step === 'context')) ||
+                    (s === 'context' && step === 'context')
+                      ? 'bg-red-500'
+                      : 'bg-white/10'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {done ? (
-          <div className="p-6 text-center space-y-3">
-            <div className="text-3xl">✅</div>
-            <p className="text-sm font-bold text-white">Report submitted</p>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              Thanks — our safety team reviews every report. You will not see
-              further updates here.
+          <div className="px-6 py-8 text-center space-y-3">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/30">
+              <Check className="h-5 w-5 text-emerald-400" />
+            </div>
+            <p className="text-base font-bold text-white">Thanks for letting us know</p>
+            <p className="text-sm text-zinc-400 leading-relaxed">
+              We&rsquo;ll review this. Playful roasts stay — harassment doesn&rsquo;t.
             </p>
             <button
               onClick={onClose}
-              className="mt-2 px-5 py-2 bg-[#ff4d00] text-black text-xs font-mono font-bold rounded-xl"
+              className="mt-2 w-full rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black hover:bg-zinc-200 min-h-[44px]"
             >
               Done
             </button>
           </div>
-        ) : (
-          <div className="p-4 space-y-3">
+        ) : step === 'reason' ? (
+          <div className="px-5 py-4 space-y-3">
+            <p className="text-sm font-semibold text-white">Why are you reporting this?</p>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              What is the reason for reporting? Context is reviewed carefully —
-              playful roasts are not automatically violations.
+              Choose the closest reason. Context matters — roasting isn&rsquo;t automatically a violation.
             </p>
-
-            <div className="grid grid-cols-1 gap-1.5 max-h-56 overflow-y-auto pr-1">
-              {REASONS.map((r) => (
+            <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto pr-1" role="radiogroup" aria-label="Report reason">
+              {reasons.map((r) => (
                 <button
                   key={r.id}
                   onClick={() => setCategory(r.id)}
-                  className={`text-left px-3 py-2.5 rounded-xl text-xs font-mono border transition-all ${
+                  role="radio"
+                  aria-checked={category === r.id}
+                  className={`text-left px-4 py-3 rounded-2xl text-sm border transition-all min-h-[44px] ${
                     category === r.id
-                      ? 'bg-red-500/10 border-red-500/50 text-red-300'
-                      : 'bg-[#0a0a0a] border-[#262626] text-zinc-300 hover:border-[#3a3a3a]'
+                      ? 'bg-red-500/10 border-red-500/50 text-red-200'
+                      : 'bg-white/5 border-white/10 text-zinc-200 hover:border-white/25 hover:bg-white/10'
                   }`}
-                  aria-pressed={category === r.id}
                 >
                   {r.label}
                 </button>
               ))}
             </div>
-
+            {error && <p className="text-xs text-red-400" role="alert">{error}</p>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => category && setStep('context')}
+                disabled={!category}
+                className="flex-1 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-black disabled:opacity-40 hover:bg-zinc-200 min-h-[44px]"
+              >
+                Continue
+              </button>
+              <button
+                onClick={onClose}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-zinc-300 min-h-[44px]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="px-5 py-4 space-y-3">
+            <button
+              onClick={() => setStep('reason')}
+              className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white min-h-[44px]"
+            >
+              <ChevronLeft className="h-4 w-4" /> Back
+            </button>
+            <p className="text-sm font-semibold text-white">Anything else we should know? <span className="text-zinc-500 font-normal">(optional)</span></p>
             <textarea
               value={context}
               onChange={(e) => setContext(e.target.value)}
-              placeholder="Optional context (helps reviewers)"
-              rows={2}
+              placeholder="Add helpful context…"
+              rows={4}
               maxLength={500}
-              className="w-full bg-[#0a0a0a] border border-[#262626] rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#ff4d00]/60 resize-none"
-              aria-label="Optional context"
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/50 resize-none"
+              aria-label="Optional additional context"
             />
-
-            {error && <p className="text-xs text-red-400 font-mono">{error}</p>}
-
+            <p className="text-[11px] text-zinc-500">{context.length}/500</p>
+            {error && <p className="text-xs text-red-400" role="alert">{error}</p>}
             <div className="flex gap-2 pt-1">
               <button
                 onClick={submit}
                 disabled={!category || submitting}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white text-xs font-mono font-bold rounded-xl transition-all"
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-bold text-white hover:bg-red-600 disabled:opacity-40 min-h-[44px]"
               >
-                {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Flag className="w-3.5 h-3.5" />}
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Flag className="h-4 w-4" />}
                 Submit report
               </button>
               <button
                 onClick={onClose}
-                className="px-4 py-2.5 bg-[#1a1a1a] border border-[#333] text-zinc-300 text-xs font-mono font-bold rounded-xl"
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-zinc-300 min-h-[44px]"
               >
                 Cancel
               </button>
