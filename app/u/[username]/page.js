@@ -21,6 +21,9 @@ import BadgeGrid from '@/components/reputation/BadgeGrid';
 import StreakDisplay from '@/components/reputation/StreakDisplay';
 import ProfileSafetyActions from '@/components/safety/ProfileSafetyActions';
 import DraftsShelf from '@/components/profile/DraftsShelf';
+import { getUserCommunities } from '@/lib/communities';
+import { getLevelInfo } from '@/lib/reputation/config';
+import { formatCompact } from '@/lib/format';
 
 /**
  * /u/:username — Enhanced Social Profile Page
@@ -79,6 +82,8 @@ export default function UserProfilePage() {
   const [activeTab, setActiveTab] = useState('posts');
   const [showFollowers, setShowFollowers] = useState(false);
   const [showFollowing, setShowFollowing] = useState(false);
+  const [communities, setCommunities] = useState([]);
+  const [communitiesLoading, setCommunitiesLoading] = useState(true);
 
   // Fetch profile
   useEffect(() => {
@@ -191,6 +196,29 @@ export default function UserProfilePage() {
       ? roasts
       : content.filter((i) => (i.type || i.contentType) !== 'photo');
 
+  // Public communities (private/hidden memberships stay invisible to
+  // other viewers; the owner sees their own full list).
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+    (async () => {
+      setCommunitiesLoading(true);
+      try {
+        const list = await getUserCommunities(profile.id);
+        if (cancelled) return;
+        const visible = isOwnProfile
+          ? (list || [])
+          : (list || []).filter((c) => c.visibility === 'public');
+        setCommunities(visible.slice(0, 6));
+      } catch {
+        if (!cancelled) setCommunities([]);
+      } finally {
+        if (!cancelled) setCommunitiesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile?.id, isOwnProfile]);
+
   // Fetch pinned/featured content (public read; validated server-side)
   useEffect(() => {
     if (!profile?.featuredPostId || !username) {
@@ -260,7 +288,7 @@ export default function UserProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
+    <div className="min-h-screen bg-[#0a0a0a] text-white px-4 sm:px-6 pt-4 sm:pt-6 pb-28 sm:pb-16 font-sans">
       <div className="max-w-2xl mx-auto space-y-6">
         {/* Back Link */}
         <Link href="/home" className="flex items-center gap-2 text-zinc-400 hover:text-white font-mono text-xs transition-colors">
@@ -268,33 +296,69 @@ export default function UserProfilePage() {
           <span>Back to Feed</span>
         </Link>
 
-        {/* Profile Header */}
-        <div className="bg-[#111] border border-[#222] rounded-2xl p-5 sm:p-6 space-y-4">
-          <div className="flex items-start gap-4">
-            <Avatar
-              username={profile.username}
-              size="xl"
-              src={profile.avatarUrl}
-              showRing={isOwnProfile}
-            />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-xl font-black text-white break-all">
-                  @{profile.username}
+        {/* Profile Hero — cover, avatar, identity, actions, stats */}
+        <section aria-label="Profile" className="overflow-hidden rounded-3xl border border-white/10 bg-[#101012]">
+          {/* Cover: ambient gradient (no fabricated imagery) */}
+          <div
+            className="h-28 bg-gradient-to-br from-[#2a1200] via-[#140a06] to-[#0a0a0a] sm:h-36"
+            aria-hidden="true"
+          >
+            <div className="h-full w-full bg-[radial-gradient(ellipse_at_top,rgba(255,77,0,0.22),transparent_65%)]" />
+          </div>
+
+          <div className="space-y-4 p-5 sm:p-6">
+            <div className="-mt-14 flex items-end justify-between gap-3 sm:-mt-16">
+              <div className="rounded-full ring-4 ring-[#101012]">
+                <Avatar
+                  username={profile.username}
+                  size="xl"
+                  src={profile.avatarUrl}
+                  showRing={isOwnProfile}
+                />
+              </div>
+              <div className="flex items-center gap-2 pb-1">
+                <ShareButton
+                  resourceType="profile"
+                  resourceId={profile.id}
+                  url={typeof window !== 'undefined' ? window.location.href : `https://burnboard.app/u/${profile.username}`}
+                  title={`@${profile.username} on BurnBoard`}
+                  text={`Follow @${profile.username} on BurnBoard 🔥`}
+                  variant="ghost"
+                  label="Share"
+                  className="px-3 py-2 text-xs min-h-[44px]"
+                />
+                {isOwnProfile ? (
+                  <Link
+                    href="/settings/profile"
+                    className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-4 text-xs font-bold text-zinc-200 transition-all hover:border-[#ff4d00]/50 hover:text-white"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    Edit Profile
+                  </Link>
+                ) : (
+                  <ProfileSafetyActions
+                    targetUserId={profile.id}
+                    targetUsername={profile.username}
+                    onBlocked={() => { setContent([]); setRoasts([]); }}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl font-black tracking-tight text-white break-all">
+                  {profile.displayName || `@${profile.username}`}
                 </h1>
                 {profile.level && profile.level !== 'Newbie' && (
                   <Badge variant="burn" size="xs">{profile.level}</Badge>
                 )}
                 {followsViewer && !isOwnProfile && (
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#1a1a1a] border border-[#2a2a2a] text-zinc-400">
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-zinc-400">
                     Follows you
                   </span>
                 )}
               </div>
-
-              {profile.displayName && (
-                <p className="text-sm text-zinc-300 mt-1">{profile.displayName}</p>
-              )}
+              <p className="font-mono text-[13px] text-zinc-500">@{profile.username}</p>
 
               {profile.bio && (
                 <p className="text-sm text-zinc-400 mt-2 leading-relaxed">{profile.bio}</p>
@@ -357,114 +421,142 @@ export default function UserProfilePage() {
                 )}
               </div>
             </div>
-          </div>
 
-          {/* Stats + Actions */}
-          <div className="flex items-center justify-between pt-4 border-t border-[#1a1a1a]">
-            <div className="flex items-center gap-6">
-              {/* Followers */}
-              <button
-                onClick={() => setShowFollowers(true)}
-                className="text-center hover:opacity-80 transition-opacity"
-              >
-                <p className="text-sm font-black text-white">{formatCount(stats.followerCount)}</p>
-                <p className="text-[10px] font-mono text-zinc-500">Followers</p>
-              </button>
-
-              {/* Following */}
-              <button
-                onClick={() => setShowFollowing(true)}
-                className="text-center hover:opacity-80 transition-opacity"
-              >
-                <p className="text-sm font-black text-white">{formatCount(stats.followingCount)}</p>
-                <p className="text-[10px] font-mono text-zinc-500">Following</p>
-              </button>
-
-              {/* Posts */}
-              <div className="text-center">
-                <p className="text-sm font-black text-[#ff4d00]">{formatCount(stats.postCount + stats.roastCount)}</p>
-                <p className="text-[10px] font-mono text-zinc-500">Posts</p>
-              </div>
-              {reputation && (
-                <div className="text-center">
-                  <p className="text-sm font-black text-[#f97316]">🔥 {formatCount(reputation.rep)}</p>
-                  <p className="text-[10px] font-mono text-zinc-500">Burn Rep</p>
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
+          {/* Follow / Message (other users) */}
+          {!isOwnProfile && (
             <div className="flex items-center gap-2">
-              <ShareButton
-                resourceType="profile"
-                resourceId={profile.id}
-                url={typeof window !== 'undefined' ? window.location.href : `https://burnboard.app/u/${profile.username}`}
-                title={`@${profile.username} on BurnBoard`}
-                text={`Follow @${profile.username} on BurnBoard 🔥`}
-                variant="ghost"
-                label="Share"
-                className="px-3 py-2 text-xs"
-              />
-              {isOwnProfile ? (
-                <>
-                  <Link
-                    href="/insights"
-                    className="flex items-center gap-1.5 px-4 py-2 bg-[#ff4d00] text-black text-xs font-mono font-bold rounded-xl transition-all hover:bg-[#ff6622]"
-                  >
-                    <BarChart3 className="w-3.5 h-3.5" />
-                    My Insights
-                  </Link>
-                  <Link
-                    href="/settings/profile"
-                    className="flex items-center gap-1.5 px-4 py-2 bg-[#1a1a1a] border border-[#333] hover:border-[#ff4d00]/50 text-zinc-300 hover:text-white text-xs font-mono font-bold rounded-xl transition-all"
-                  >
-                    <Settings className="w-3.5 h-3.5" />
-                    Edit Profile
-                  </Link>
-                </>
-              ) : (
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <FollowButton
-                    targetUserId={profile.id}
-                    initialIsFollowing={isFollowing}
-                    initialFollowerCount={stats.followerCount}
-                    onFollowChange={handleFollowChange}
-                  />
-                  <Link
-                    href={`/messages?user=${profile.id}`}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-[#1a1a1a] border border-[#333] hover:border-[#ff4d00]/50 text-zinc-300 hover:text-white text-xs font-mono font-bold rounded-xl transition-all"
-                    aria-label={`Message @${profile.username}`}
-                  >
-                    <MessageCircle className="w-3.5 h-3.5" />
-                    Message
-                  </Link>
-                  <ProfileSafetyActions
-                    targetUserId={profile.id}
-                    targetUsername={profile.username}
-                    onBlocked={() => setContent([])}
-                  />
-                </div>
-              )}
+              <div className="flex-1">
+                <FollowButton
+                  targetUserId={profile.id}
+                  initialIsFollowing={isFollowing}
+                  initialFollowerCount={stats.followerCount}
+                  onFollowChange={handleFollowChange}
+                />
+              </div>
+              <Link
+                href={`/messages?user=${profile.id}`}
+                className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/5 text-xs font-bold text-zinc-200 transition-all hover:border-[#ff4d00]/50 hover:text-white"
+                aria-label={`Message @${profile.username}`}
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                Message
+              </Link>
+            </div>
+          )}
+
+          {/* Owner insights shortcut */}
+          {isOwnProfile && (
+            <Link
+              href="/insights"
+              className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-[#ff4d00] text-xs font-black uppercase tracking-wider text-black transition-all hover:bg-[#ff6622] active:scale-[0.99]"
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              My Insights
+            </Link>
+          )}
+
+          {/* Stats strip */}
+          <div className="grid grid-cols-4 gap-2 rounded-2xl border border-white/10 bg-black/30 p-3">
+            <button
+              onClick={() => setShowFollowers(true)}
+              className="min-h-[52px] rounded-xl text-center transition-colors hover:bg-white/5"
+            >
+              <p className="text-[15px] font-black text-white">{formatCount(stats.followerCount)}</p>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">Followers</p>
+            </button>
+            <button
+              onClick={() => setShowFollowing(true)}
+              className="min-h-[52px] rounded-xl text-center transition-colors hover:bg-white/5"
+            >
+              <p className="text-[15px] font-black text-white">{formatCount(stats.followingCount)}</p>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">Following</p>
+            </button>
+            <div className="flex min-h-[52px] flex-col items-center justify-center text-center">
+              <p className="text-[15px] font-black text-[#ff4d00]">{formatCount(stats.postCount + stats.roastCount)}</p>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">Posts</p>
+            </div>
+            <div className="flex min-h-[52px] flex-col items-center justify-center text-center">
+              <p className="text-[15px] font-black text-[#ff4d00]">
+                {reputation ? `🔥 ${formatCount(reputation.rep)}` : '—'}
+              </p>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">Burn Rep</p>
             </div>
           </div>
-        </div>
+          </div>
+        </section>
 
-        {/* Level Progress */}
-        {reputation && (
-          <LevelBadge reputation={reputation.rep} />
-        )}
+        {/* Level / XP card (same engine as Rank) */}
+        {reputation && (() => {
+          const info = getLevelInfo(reputation.rep || 0);
+          return (
+            <section aria-label="Level progress" className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-xl">
+              <div className="flex items-center justify-between">
+                <p className="text-[13px] font-extrabold tracking-tight text-white">
+                  LEVEL {info.level} · {info.name} {info.emoji}
+                </p>
+                <p className="font-mono text-[11px] text-zinc-400">
+                  {formatCompact(reputation.rep || 0)} XP
+                </p>
+              </div>
+              <div
+                className="mt-2.5 h-2.5 overflow-hidden rounded-full border border-white/10 bg-black/60"
+                role="progressbar"
+                aria-valuenow={Math.round(info.progress || 0)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="XP progress to next level"
+              >
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-orange-600 to-[#ff4d00] transition-all duration-500"
+                  style={{ width: `${Math.min(100, info.progress || 0)}%` }}
+                />
+              </div>
+              <p className="mt-1.5 font-mono text-[11px] text-zinc-500">
+                {info.nextLevel
+                  ? `${formatCompact(info.progressToNext)} XP to ${info.nextLevel.name}`
+                  : 'Max level reached'}
+              </p>
+            </section>
+          );
+        })()}
 
         {/* Streak */}
         {streak && streak.current_streak > 0 && (
           <StreakDisplay userId={profile.id} />
         )}
 
-        {/* Badges */}
+        {/* Achievements */}
         {badges.length > 0 && (
-          <div className="bg-[#111] border border-[#222] rounded-2xl p-4">
-            <h3 className="text-sm font-black text-white uppercase tracking-wider mb-3">Badges</h3>
+          <section aria-label="Achievements" className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-xl">
+            <h3 className="mb-3 text-[13px] font-extrabold tracking-tight text-white">Achievements</h3>
             <BadgeGrid userId={profile.id} isOwnProfile={isOwnProfile} />
-          </div>
+          </section>
+        )}
+
+        {/* Communities (public only for other viewers) */}
+        {!communitiesLoading && communities.length > 0 && (
+          <section aria-label="Communities" className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-xl">
+            <h3 className="mb-2 text-[13px] font-extrabold tracking-tight text-white">Communities</h3>
+            <div className="space-y-1">
+              {communities.map((c) => (
+                <Link
+                  key={c.id}
+                  href={`/c/${c.slug}`}
+                  className="flex min-h-[44px] items-center justify-between rounded-xl px-2 py-2 transition-colors hover:bg-white/5"
+                >
+                  <span className="truncate text-[13px] font-semibold text-zinc-200">{c.name}</span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {isOwnProfile && ['owner', 'admin', 'moderator'].includes(c.role) && (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] capitalize text-zinc-400">
+                        {c.role}
+                      </span>
+                    )}
+                    <span aria-hidden="true" className="text-zinc-600">›</span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
         )}
 
         {/* Featured / pinned content */}
@@ -532,6 +624,48 @@ export default function UserProfilePage() {
                 <Flame className="w-4 h-4 fill-black" />
                 Create Post
               </Link>
+            )}
+          </div>
+        ) : activeTab === 'photos' ? (
+          <div>
+            <div className="grid grid-cols-3 gap-1.5" role="list" aria-label="Photos">
+              {tabItems.filter(item => item.id !== featured?.id).map(item => (
+                <Link
+                  key={item.id}
+                  href={`/post/${item.id}`}
+                  role="listitem"
+                  aria-label="Open photo post"
+                  className="group relative aspect-square overflow-hidden rounded-xl border border-white/10 bg-[#141416]"
+                >
+                  {item.mediaUrl ? (
+                    <img
+                      src={item.mediaUrl}
+                      alt="User photo"
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center p-2 text-center text-[11px] leading-snug text-zinc-400">
+                      {item.text ? (item.text.length > 80 ? `${item.text.slice(0, 80)}…` : item.text) : 'Post'}
+                    </span>
+                  )}
+                  {(item.upvotes > 0 || item.commentCount > 0) && (
+                    <span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/65 px-2 py-0.5 font-mono text-[10px] text-white backdrop-blur-md">
+                      ▲ {formatCount(item.upvotes || 0)}{item.commentCount > 0 ? ` · 💬 ${formatCount(item.commentCount)}` : ''}
+                    </span>
+                  )}
+                </Link>
+              ))}
+            </div>
+            {contentHasMore && (
+              <button
+                onClick={loadMoreContent}
+                disabled={contentLoadingMore}
+                className="mt-3 w-full min-h-[44px] rounded-2xl border border-white/10 bg-white/[0.03] text-xs font-bold text-zinc-300 hover:text-white hover:border-white/25 transition-all disabled:opacity-50"
+              >
+                {contentLoadingMore ? 'Loading…' : 'Load more'}
+              </button>
             )}
           </div>
         ) : (
