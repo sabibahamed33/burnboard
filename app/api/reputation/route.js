@@ -32,8 +32,8 @@ export async function GET(req) {
     const type = searchParams.get('type') || 'user';
     const userId = searchParams.get('user_id');
     const period = searchParams.get('period') || 'all_time';
-    const limit = parseInt(searchParams.get('limit') || '20', 10);
-    const offset = parseInt(searchParams.get('offset') || '0', 10);
+    const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10) || 20, 50);
+    const offset = Math.max(parseInt(searchParams.get('offset') || '0', 10) || 0, 0);
 
     switch (type) {
       case 'leaderboard': {
