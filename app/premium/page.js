@@ -82,7 +82,7 @@ export default function PremiumPage() {
             <h1 className="text-2xl font-black uppercase tracking-wider font-mono">BurnBoard Premium</h1>
           </div>
           <p className="text-xs text-zinc-400 max-w-md mx-auto font-mono leading-relaxed">
-            More tools for creators, more control for everyone. Real value — never a paywall on safety, privacy, or basic participation.
+            More tools for posting, more control for everyone. Real value — never a paywall on safety, privacy, or basic participation.
           </p>
 
           {catalog?.testMode && (
@@ -111,7 +111,7 @@ export default function PremiumPage() {
           <>
             <div className="grid sm:grid-cols-3 gap-3">
               {[
-                { emoji: '📊', title: 'Advanced creator analytics', text: 'Deeper insight into what performs, built on real data.' },
+                { emoji: '📊', title: 'Advanced insights', text: 'Deeper insight into what performs, built on real data. Available to every user.' },
                 { emoji: '🎨', title: 'Profile customization', text: 'Make your profile yours without losing your identity.' },
                 { emoji: '🚀', title: 'Priority discovery & controls', text: 'More tools to find and be found — and to tune your feed.' },
               ].map(f => (

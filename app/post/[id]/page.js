@@ -145,15 +145,50 @@ export default async function PostPage({ params }) {
   }
 
   if (!profile) {
-    // Resolve a modern UGC post (public + moderation-visible via RLS).
+    // Resolve a modern UGC post. Anonymous reads see public posts only
+    // (RLS). Signed-in viewers additionally see their own + followers-only
+    // posts from followed authors — enforced in-app below, never trusting
+    // the row alone. generateMetadata above stays public-only (no leaks).
     let postRow = null;
     try {
-      const { data } = await supabase
+      const { createClient: createServerSupabase } = await import('@/lib/supabase/server');
+      const { canViewPost } = await import('@/lib/photoPosts');
+      const serverDb = await createServerSupabase();
+      const { data: { user: viewer } } = await serverDb.auth.getUser();
+      const { data } = await serverDb
         .from('social_posts')
         .select('*, user_profiles!inner(id, username, display_name, avatar_url, bio), polls(*)')
         .eq('id', id)
         .maybeSingle();
-      postRow = data;
+      if (data) {
+        let isFollower = false;
+        if (viewer && viewer.id !== data.user_id && data.visibility === 'followers') {
+          const { data: follow } = await serverDb
+            .from('follows')
+            .select('id')
+            .eq('follower_id', viewer.id)
+            .eq('following_id', data.user_id)
+            .maybeSingle();
+          isFollower = !!follow;
+        }
+        if (canViewPost(data, viewer?.id || null, isFollower)) {
+          // Resolve tagged users for the metadata chips (one query).
+          const taggedIds = Array.isArray(data.metadata?.tagged_user_ids)
+            ? data.metadata.tagged_user_ids.filter(Boolean).slice(0, 10)
+            : [];
+          let taggedUsers = [];
+          if (taggedIds.length) {
+            try {
+              const { data: tagged } = await serverDb
+                .from('user_profiles')
+                .select('id, username, display_name')
+                .in('id', taggedIds);
+              taggedUsers = (tagged || []).map((t) => ({ id: t.id, username: t.username, displayName: t.display_name }));
+            } catch {}
+          }
+          postRow = { ...data, taggedUsers };
+        }
+      }
     } catch (err) {
       console.error('[Post Page] UGC fetch error:', err);
     }

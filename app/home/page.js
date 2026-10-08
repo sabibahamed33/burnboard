@@ -342,6 +342,15 @@ export default function SocialHomePage() {
   const handleNotInterested = useCallback((item) => applyFeedback(item, 'not_interested'), [applyFeedback]);
   const handleHide = useCallback((item) => applyFeedback(item, 'hide'), [applyFeedback]);
 
+  // Owner post controls: remove deleted/unpublished rows instantly, merge
+  // edited rows in place (server already re-verified ownership).
+  const handleDeletedItem = useCallback((item) => {
+    setItems(prev => prev.filter(x => !(x.id === item.id && x.type === item.type)));
+  }, []);
+  const handleUpdatedItem = useCallback((updated) => {
+    setItems(prev => prev.map(x => (x.id === updated.id && x.type === updated.type ? updated : x)));
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <div className="max-w-6xl mx-auto flex">
@@ -522,6 +531,8 @@ export default function SocialHomePage() {
                   onReport={handleReport}
                   onNotInterested={signedIn ? handleNotInterested : null}
                   onHide={signedIn ? handleHide : null}
+                  onDeleted={handleDeletedItem}
+                  onUpdated={handleUpdatedItem}
                 />
                 {debugFeed && item.debug && (
                   <p className="text-[10px] font-mono text-zinc-600 px-1 -mt-2">

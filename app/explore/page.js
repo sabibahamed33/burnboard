@@ -11,6 +11,7 @@ import {
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { CommunityCard } from '@/components/communities';
 import { ChallengeCard } from '@/components/challenges';
+import TopicsStrip from '@/components/discover/TopicsStrip';
 
 /**
  * /explore — Social Discovery Hub
@@ -304,7 +305,7 @@ export default function ExplorePage() {
           </div>
         </header>
 
-        {/* Search */}
+        {/* Search — quick local filter; full search lives on /search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
           <input
@@ -312,9 +313,18 @@ export default function ExplorePage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search targets by handle, bio or platform..."
-            className="w-full bg-[#111] border border-[#222] rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#ff4d00] transition-colors"
+            aria-label="Filter targets on this page"
+            className="w-full bg-[#111] border border-[#222] rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#ff4d00] transition-colors min-h-[44px]"
           />
         </div>
+        <div className="flex items-center justify-between -mt-3">
+          <span className="text-[10px] font-mono text-zinc-600">Filtering loaded targets</span>
+          <Link href="/search" className="text-[11px] font-mono text-[#ff4d00] hover:text-white transition-colors min-h-[36px] inline-flex items-center">
+            Full search — people, roasts, #tags →
+          </Link>
+        </div>
+
+        <TopicsStrip />
 
         {/* Section Tabs */}
         <div className="flex items-center gap-1 bg-[#111] p-1 rounded-xl border border-[#222] overflow-x-auto">

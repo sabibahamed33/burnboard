@@ -72,9 +72,9 @@ export default function SocialShell({ children }) {
     return pathname.startsWith(href);
   };
 
-  // Creator Studio is only meaningful for signed-in creators.
+  // My Insights is available to every signed-in user — no special account type.
   const secondaryItems = user
-    ? [...SECONDARY_ITEMS, { key: 'creator', label: 'Creator Studio', icon: BarChart3, href: '/creator' }]
+    ? [...SECONDARY_ITEMS, { key: 'insights', label: 'My Insights', icon: BarChart3, href: '/insights' }]
     : SECONDARY_ITEMS;
 
   return (

@@ -33,6 +33,11 @@ function getSupabase() {
   return createClient(supabaseUrl, supabaseKey);
 }
 
+// follows.* ids are UUIDs (FK → auth.users). Anonymous `anon_*`
+// participant ids can never be valid here.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function GET(req) {
   try {
     const supabase = getSupabase();
@@ -94,7 +99,18 @@ export async function POST(req) {
     }
 
     const body = await req.json();
-    const { target_user_id, action, viewer_id } = body;
+    const { target_user_id, action } = body;
+    let { viewer_id } = body;
+
+    // Resolve the real actor: the signed-in session wins over any
+    // client-supplied viewer_id (prevents follow spoofing).
+    const session = await getRequestContext(req);
+    if (session?.userId) {
+      if (viewer_id && viewer_id !== session.userId) {
+        return NextResponse.json({ error: 'Identity mismatch. Please refresh and try again.' }, { status: 403 });
+      }
+      viewer_id = session.userId;
+    }
 
     if (viewer_id) {
       const userLimit = rateLimitMiddleware(ipKey(viewer_id, 'follow_user'), RATE_LIMITS.FOLLOW);
@@ -108,6 +124,20 @@ export async function POST(req) {
         { error: 'Missing required fields: target_user_id, action, viewer_id' },
         { status: 400 }
       );
+    }
+
+    // Only real user ids can follow (anon participant ids fail the
+    // UUID/FK constraint — reject with a friendly message, not a 500).
+    if (!UUID_RE.test(viewer_id)) {
+      return NextResponse.json({ error: 'Sign in to follow creators.' }, { status: 401 });
+    }
+
+    // Writes require the session client: RLS enforces
+    // auth.uid() = follower_id on follows, so the anon-key client can
+    // never insert/delete (RLS would deny it). No session → no follow.
+    const writeClient = session?.client && session.userId === viewer_id ? session.client : null;
+    if (!writeClient) {
+      return NextResponse.json({ error: 'Sign in to follow creators.' }, { status: 401 });
     }
 
     // Prevent self-follow
@@ -127,22 +157,20 @@ export async function POST(req) {
     }
 
     if (action === 'follow') {
-      // ── Safety enforcement (Master Prompt 11): blocks are mutual. ──
-      // If either side blocks the other, following must be refused — never
-      // rely on hidden buttons. Uses the session relationship when signed
-      // in; legacy viewer_id bodies keep working but cannot bypass a block.
+      // ── Safety enforcement: blocks are mutual. ──
+      // If either side blocks the other, following is refused — never rely
+      // on hidden buttons. Checked for every caller (the RPC takes explicit
+      // ids, so no session is required to enforce it).
       try {
-        const session = await getRequestContext(req);
-        if (session?.client && session.userId) {
-          const rel = await relationshipBetween(session.client, session.userId, target_user_id);
-          if (rel.viewer_blocks_other || rel.other_blocks_viewer) {
-            return NextResponse.json({ error: 'You cannot follow this user' }, { status: 403 });
-          }
+        const relClient = session?.client || supabase;
+        const rel = await relationshipBetween(relClient, viewer_id, target_user_id);
+        if (rel.viewer_blocks_other || rel.other_blocks_viewer) {
+          return NextResponse.json({ error: 'You cannot follow this user' }, { status: 403 });
         }
       } catch {}
 
       // Check if already following
-      const { data: existing } = await supabase
+      const { data: existing } = await writeClient
         .from('follows')
         .select('id')
         .eq('follower_id', viewer_id)
@@ -153,8 +181,8 @@ export async function POST(req) {
         return NextResponse.json({ success: true, action: 'already_following', isFollowing: true });
       }
 
-      // Create follow relationship
-      const { error } = await supabase
+      // Create follow relationship (session client: satisfies RLS).
+      const { error } = await writeClient
         .from('follows')
         .insert({ follower_id: viewer_id, following_id: target_user_id });
 
@@ -163,8 +191,8 @@ export async function POST(req) {
         return NextResponse.json({ error: 'Failed to follow' }, { status: 500 });
       }
     } else if (action === 'unfollow') {
-      // Delete follow relationship
-      const { error } = await supabase
+      // Delete follow relationship (session client: satisfies RLS).
+      const { error } = await writeClient
         .from('follows')
         .delete()
         .eq('follower_id', viewer_id)
@@ -181,7 +209,6 @@ export async function POST(req) {
     // Real behavior signal: follow/unfollow by the authenticated actor
     // (verified against the session so viewers can't record for others).
     try {
-      const session = await getRequestContext(req);
       if (session?.client && session.userId && session.userId === viewer_id) {
         recordSignal({
           client: session.client,

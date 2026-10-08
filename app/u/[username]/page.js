@@ -14,12 +14,13 @@ import FollowButton from '@/components/social/FollowButton';
 import ShareButton from '@/components/growth/ShareButton';
 import { FeedCard } from '@/components/feed';
 import { CardSkeleton } from '@/components/ui/Skeleton';
-import { getParticipantId } from '@/components/feed/ReactionBar';
+import { getViewerId } from '@/lib/identity';
 import { track } from '@/lib/analytics';
 import LevelBadge from '@/components/reputation/LevelBadge';
 import BadgeGrid from '@/components/reputation/BadgeGrid';
 import StreakDisplay from '@/components/reputation/StreakDisplay';
 import ProfileSafetyActions from '@/components/safety/ProfileSafetyActions';
+import DraftsShelf from '@/components/profile/DraftsShelf';
 
 /**
  * /u/:username — Enhanced Social Profile Page
@@ -87,7 +88,9 @@ export default function UserProfilePage() {
       }
 
       try {
-        const viewerId = getParticipantId();
+        // Prefer the auth user id so isFollowing/isOwnProfile resolve
+        // correctly for signed-in viewers (anon participant ids never match).
+        const { viewerId } = await getViewerId();
         const res = await fetch(`/api/profile?username=${encodeURIComponent(username)}&viewer_id=${encodeURIComponent(viewerId || '')}`);
         const data = await res.json();
 
@@ -162,6 +165,14 @@ export default function UserProfilePage() {
   const handleFollowChange = useCallback((newIsFollowing, newCount) => {
     setIsFollowing(newIsFollowing);
     setStats(prev => ({ ...prev, followerCount: newCount }));
+  }, []);
+
+  // Owner post controls: drop deleted/unpublished rows, merge edits.
+  const handleDeletedContent = useCallback((item) => {
+    setContent(prev => prev.filter(x => !(x.id === item.id)));
+  }, []);
+  const handleUpdatedContent = useCallback((updated) => {
+    setContent(prev => prev.map(x => (x.id === updated.id ? updated : x)));
   }, []);
 
   // Loading
@@ -251,7 +262,7 @@ export default function UserProfilePage() {
                 </a>
               )}
 
-              {/* Creator Topic identity tags (controlled, public) */}
+              {/* Topic identity tags (controlled, public) */}
               {profile.creatorTopics && profile.creatorTopics.length > 0 && (
                 <div className="flex items-center flex-wrap gap-1.5 mt-2.5">
                   {profile.creatorTopics.map((topic) => (
@@ -329,11 +340,11 @@ export default function UserProfilePage() {
               {isOwnProfile ? (
                 <>
                   <Link
-                    href="/creator"
+                    href="/insights"
                     className="flex items-center gap-1.5 px-4 py-2 bg-[#ff4d00] text-black text-xs font-mono font-bold rounded-xl transition-all hover:bg-[#ff6622]"
                   >
                     <BarChart3 className="w-3.5 h-3.5" />
-                    Creator Studio
+                    My Insights
                   </Link>
                   <Link
                     href="/settings/profile"
@@ -391,6 +402,9 @@ export default function UserProfilePage() {
           </div>
         )}
 
+        {/* Owner-only private drafts shelf (invisible to other viewers) */}
+        <DraftsShelf userId={profile.id} enabled={isOwnProfile} />
+
         {/* Content Tabs */}
         <div className="flex items-center gap-1 bg-[#111] p-1 rounded-xl border border-[#222]">
           <button
@@ -446,7 +460,7 @@ export default function UserProfilePage() {
         ) : (
           <div className="space-y-4">
             {content.filter(item => item.id !== featured?.id).map(item => (
-              <FeedCard key={item.id} item={item} />
+              <FeedCard key={item.id} item={item} onDeleted={handleDeletedContent} onUpdated={handleUpdatedContent} />
             ))}
           </div>
         )}
@@ -484,7 +498,7 @@ function FollowListModal({ userId, type, onClose }) {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const viewerId = getParticipantId();
+        const { viewerId } = await getViewerId();
         const res = await fetch(`/api/follow/list?user_id=${userId}&type=${type}&viewer_id=${encodeURIComponent(viewerId || '')}`);
         const data = await res.json();
         if (res.ok) {

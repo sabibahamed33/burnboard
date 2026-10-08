@@ -17,6 +17,7 @@ export default function robots() {
           '/auth',
           '/auth/',
           '/creator',
+          '/insights',
           '/settings',
           '/notifications',
           '/s/',

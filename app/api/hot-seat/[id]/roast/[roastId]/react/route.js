@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
+import { isFallbackId, toggleFallbackReaction } from '@/lib/hotSeatFallback';
 
 const VALID_REACTIONS = ['funny', 'savage', 'fatal'];
 
@@ -36,6 +37,21 @@ export async function POST(req, { params }) {
 
     if (!participant_id || !participant_id.trim()) {
       return NextResponse.json({ error: 'Participant ID required' }, { status: 400 });
+    }
+
+    // Local fallback roasts (tables missing / DB not configured) — toggle in-memory
+    if (isFallbackId(roastId)) {
+      const result = toggleFallbackReaction(hotSeatId, roastId, participant_id.trim(), reaction_type);
+      if (!result) {
+        return NextResponse.json({ error: 'Roast not found' }, { status: 404 });
+      }
+      return NextResponse.json({
+        success: true,
+        action: result.action,
+        reaction_type: result.reaction_type,
+        counts: result.counts,
+        _fallback: true,
+      });
     }
 
     if (!isSupabaseConfigured || !supabase) {

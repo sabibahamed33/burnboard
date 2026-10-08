@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { track } from '@/lib/analytics';
+import PhotoComposer from '@/components/create/PhotoComposer';
 
 /**
  * /create — Universal Content Creation Entry Point
@@ -333,23 +334,37 @@ export default function CreatePage() {
 
   // ── Step 3: Success ──────────────────────────────────────
   if (step === 3 && createdPost) {
+    const createdVisibility = createdPost.visibility || 'public';
+    const isDraftPost = createdVisibility === 'draft';
+    const isScheduledPost = createdVisibility === 'scheduled';
     return (
       <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
         <div className="max-w-lg mx-auto space-y-6 pt-8">
           <div className="text-center space-y-4">
             <div className="text-6xl animate-bounce">✅</div>
             <h1 className="text-2xl font-black text-white uppercase tracking-wider">
-              POSTED!
+              {isDraftPost ? 'DRAFT SAVED!' : isScheduledPost ? 'SCHEDULED!' : 'POSTED!'}
             </h1>
             <p className="text-sm text-zinc-400 max-w-sm mx-auto">
-              Your {selectedType.label.toLowerCase()} is now live.
+              {isDraftPost
+                ? 'Your draft is private — only you can see it until you publish.'
+                : isScheduledPost
+                  ? 'Your post will go live automatically at the scheduled time.'
+                  : `Your ${selectedType.label.toLowerCase()} is now live.`}
             </p>
           </div>
 
           <div className="bg-[#111] border border-[#222] rounded-2xl p-5 space-y-3">
-            <p className="text-sm text-zinc-100 leading-relaxed">
-              &ldquo;{text}&rdquo;
-            </p>
+            {createdPost.media_url && (
+              <div className="rounded-xl overflow-hidden">
+                <img src={createdPost.media_url} alt="Published post" className="w-full max-h-80 object-cover" />
+              </div>
+            )}
+            {(text || createdPost.content_text) && (
+              <p className="text-sm text-zinc-100 leading-relaxed">
+                &ldquo;{text || createdPost.content_text}&rdquo;
+              </p>
+            )}
             <p className="text-[11px] font-mono text-zinc-500">
               {selectedType.icon} {selectedType.label} ·{' '}
               {challengeCtx
@@ -458,7 +473,7 @@ export default function CreatePage() {
             </div>
 
             {/* Context field (for opinion, question) */}
-            {selectedType.supportsContext !== false && selectedType.type !== 'poll' && (
+            {selectedType.supportsContext !== false && selectedType.type !== 'poll' && selectedType.type !== 'photo' && (
               <div>
                 <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
                   Context <span className="text-zinc-600">(optional)</span>
@@ -517,13 +532,19 @@ export default function CreatePage() {
               </div>
             )}
 
-            {/* Photo upload placeholder */}
+            {/* Rich photo composer (upload + optional metadata + privacy) */}
             {selectedType.type === 'photo' && (
-              <div className="bg-[#111] border border-dashed border-[#333] rounded-xl p-8 text-center space-y-3">
-                <Camera className="w-8 h-8 text-zinc-500 mx-auto" />
-                <p className="text-xs text-zinc-400">Photo upload coming soon</p>
-                <p className="text-[10px] text-zinc-500">For now, share a text post instead</p>
-              </div>
+              <PhotoComposer
+                communityId={targetCommunityId}
+                challengeCtx={challengeCtx}
+                onBack={handleBack}
+                onPublished={(post) => {
+                  setCreatedPost(post);
+                  setStep(3);
+                  clearDraft();
+                  track('publish_succeeded', { type: 'photo', visibility: post?.visibility || 'public' });
+                }}
+              />
             )}
           </div>
 
@@ -608,7 +629,8 @@ export default function CreatePage() {
           </div>
           )}
 
-          {/* Publish Button */}
+          {/* Publish Button (photo uses its own composer actions) */}
+          {selectedType.type !== 'photo' && (
           <button
             onClick={handlePublish}
             disabled={isSubmitting || text.trim().length < selectedType.minLength}
@@ -624,6 +646,7 @@ export default function CreatePage() {
               </>
             )}
           </button>
+          )}
         </div>
       </div>
     );

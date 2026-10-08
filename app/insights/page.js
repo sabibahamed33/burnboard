@@ -10,14 +10,13 @@ export const metadata = {
 };
 
 /**
- * /creator — private My Insights (universal user feature).
+ * /insights — canonical My Insights route (universal user feature).
  *
  * Every BurnBoard account is simply a USER — there is no separate Creator
  * identity. This private dashboard is available to any signed-in user.
- * Access control is enforced server-side (never a hidden frontend route):
- * signed-out visitors are redirected to /auth before any data loads.
+ * /creator renders the same dashboard for backwards compatibility.
  */
-export default async function CreatorPage() {
+export default async function InsightsPage() {
   const cookieStore = cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL,

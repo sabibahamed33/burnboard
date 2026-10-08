@@ -33,7 +33,7 @@ export default function EditProfilePage() {
   const [usernameAvailable, setUsernameAvailable] = useState(true);
   const [checkingUsername, setCheckingUsername] = useState(false);
 
-  // Creator identity topics
+  // Interest topic tags (shown on your profile)
   const [topicCatalog, setTopicCatalog] = useState([]);
   const [selectedTopics, setSelectedTopics] = useState([]);
   const [topicsReady, setTopicsReady] = useState(false);
@@ -71,7 +71,7 @@ export default function EditProfilePage() {
           setWebsite(profile.website_url || '');
         }
 
-        // Creator Topic associations (identity tags shown on your profile)
+        // Topic associations (identity tags shown on your profile)
         try {
           const res = await fetch('/api/creator/topics', { cache: 'no-store' });
           const topicsData = await res.json();
@@ -312,11 +312,11 @@ export default function EditProfilePage() {
           </div>
         </div>
 
-        {/* Creator Topics — what you create about (identity tags) */}
+        {/* Topics — what you post about (identity tags) */}
         <div className="bg-[#111] border border-[#222] rounded-2xl p-4">
           <div className="flex items-center justify-between mb-1">
             <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-              What you create about
+              What you post about
             </label>
             {topicsSaving && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#ff4d00]" />}
           </div>
@@ -397,12 +397,12 @@ export default function EditProfilePage() {
           )}
         </button>
 
-        {/* Creator Studio link */}
+        {/* My Insights link — available to every user */}
         <Link
-          href="/creator"
+          href="/insights"
           className="block bg-[#111] border border-[#222] hover:border-[#ff4d00]/40 rounded-2xl p-4 transition-colors"
         >
-          <p className="text-sm font-bold text-white">Creator Studio</p>
+          <p className="text-sm font-bold text-white">My Insights</p>
           <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
             Your private dashboard — content performance, audience growth, and milestones from real activity.
           </p>

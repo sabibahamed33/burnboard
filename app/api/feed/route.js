@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getRequestContext } from '@/lib/routeAuth';
 import { instrumentHandler } from '@/lib/metrics';
 import { transformRoastItem, transformSocialPostItem } from '@/lib/reco/items';
-import { buildPersonalizedFeed, buildFollowingFeed } from '@/lib/reco/feedBuilder';
+import { buildPersonalizedFeed, buildFollowingFeed, attachTaggedUsers } from '@/lib/reco/feedBuilder';
 import { parseExcludeParam } from '@/lib/reco/exclusion';
 import { buildViewerState } from '@/lib/reco/viewer';
 import { recordSignal } from '@/lib/reco/signals';
@@ -90,6 +90,8 @@ async function buildGenericFeed(supabase, { cursor, limit, window, now }) {
   let postQuery = supabase
     .from('social_posts')
     .select('*, user_profiles!inner(id, username, display_name, bio), polls(*)')
+    // Public discovery only — drafts/scheduled/restricted never surface.
+    .eq('visibility', 'public')
     .order('created_at', { ascending: false })
     .limit(limit + 1);
 
@@ -141,6 +143,7 @@ async function buildGenericFeed(supabase, { cursor, limit, window, now }) {
   }
 
   const feedItems = transformed.sort((a, b) => b.score - a.score).slice(0, limit);
+  await attachTaggedUsers(supabase, feedItems);
 
   return { feedItems, nextCursor };
 }
@@ -166,6 +169,40 @@ async function getHandler(req) {
     // Resolve the signed-in viewer (session cookie) when present.
     const { client: sessionClient, userId } = await getRequestContext(req);
     const authed = !!(sessionClient && userId);
+
+    // Opportunistic publish: the owner's own due scheduled posts flip the
+    // moment they load the feed (owner-only RLS update; the daily cron
+    // sweeps everything else). Fire-and-forget, bounded, never blocking.
+    if (authed) {
+      (async () => {
+        try {
+          const nowIso = new Date().toISOString();
+          const { data: due } = await sessionClient
+            .from('social_posts')
+            .select('id, metadata')
+            .eq('user_id', userId)
+            .eq('visibility', 'scheduled')
+            .lte('metadata->>scheduled_at', nowIso)
+            .limit(10);
+          for (const row of due || []) {
+            try {
+              const meta = { ...(row.metadata || {}) };
+              const target = ['public', 'followers', 'only_me'].includes(meta.target_visibility)
+                ? meta.target_visibility
+                : 'public';
+              delete meta.scheduled_at;
+              meta.published_at = nowIso;
+              await sessionClient
+                .from('social_posts')
+                .update({ visibility: target, metadata: meta, updated_at: nowIso })
+                .eq('id', row.id)
+                .eq('user_id', userId)
+                .eq('visibility', 'scheduled');
+            } catch {}
+          }
+        } catch {}
+      })();
+    }
 
     // ── TRENDING (unchanged) ─────────────────────────────────
     if (tab === 'trending') {

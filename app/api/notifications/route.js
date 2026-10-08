@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { fetchNotifications, getUnreadCount, markAllAsRead } from '@/lib/notifications';
 import { instrumentHandler } from '@/lib/metrics';
+import { getRequestContext } from '@/lib/routeAuth';
 
 /**
  * GET /api/notifications
@@ -20,8 +20,10 @@ async function getHandler(req) {
     const unreadOnly = searchParams.get('unread') === 'true';
     const countOnly = searchParams.get('count') === 'true';
 
-    // Get authenticated user from Supabase SSR session
-    const userId = await getAuthUserId(req);
+    // Get authenticated user from the Supabase SSR session (cookies).
+    // Reads are RLS-gated (auth.uid() = user_id), so every query below
+    // runs through the session client — never the anon client.
+    const { client, userId } = await getRequestContext(req);
     
     if (!userId) {
       // Anonymous users: return empty (no notifications for anon)
@@ -32,12 +34,12 @@ async function getHandler(req) {
     }
 
     if (countOnly) {
-      const count = await getUnreadCount(userId);
+      const count = await getUnreadCount(userId, client);
       return NextResponse.json({ success: true, count });
     }
 
-    const notifications = await fetchNotifications(userId, { limit, offset, unreadOnly });
-    const count = await getUnreadCount(userId);
+    const notifications = await fetchNotifications(userId, { limit, offset, unreadOnly }, client);
+    const count = await getUnreadCount(userId, client);
 
     return NextResponse.json({ 
       success: true, 
@@ -61,13 +63,13 @@ async function postHandler(req) {
     const body = await req.json();
     const { action } = body;
 
-    const userId = await getAuthUserId(req);
+    const { client, userId } = await getRequestContext(req);
     if (!userId) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
     if (action === 'mark_all_read') {
-      const success = await markAllAsRead(userId);
+      const success = await markAllAsRead(userId, client);
       return NextResponse.json({ success });
     }
 
@@ -80,30 +82,3 @@ async function postHandler(req) {
 
 export const GET = instrumentHandler('notifications', getHandler);
 export const POST = instrumentHandler('notifications', postHandler);
-
-// ── Auth Helper ──────────────────────────────────────────────
-async function getAuthUserId(req) {
-  try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
-    
-    if (!supabaseUrl || !supabaseKey) return null;
-
-    // Try to get user from cookie-based session
-    const cookieHeader = req.headers.get('cookie') || '';
-    
-    const supabase = createClient(supabaseUrl, supabaseKey, {
-      cookies: {
-        get(name) {
-          const match = cookieHeader.match(new RegExp(`${name}=([^;]+)`));
-          return match ? match[1] : undefined;
-        },
-      },
-    });
-
-    const { data: { user } } = await supabase.auth.getUser();
-    return user?.id || null;
-  } catch {
-    return null;
-  }
-}

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 
 /**
- * /creator — private Creator Studio (Master Prompt 13)
+ * /creator — private My Insights (universal user feature)
  *
  * Everything rendered here comes from /api/creator/dashboard + /api/creator/content,
  * which compute REAL metrics only (posts, reactions, comments, followers,
@@ -209,7 +209,7 @@ export default function CreatorDashboard() {
       <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
         <div className="max-w-4xl mx-auto flex flex-col items-center justify-center py-24 gap-3">
           <Loader2 className="w-6 h-6 animate-spin text-[#ff4d00]" />
-          <p className="text-xs font-mono text-zinc-500">Loading your creator studio…</p>
+          <p className="text-xs font-mono text-zinc-500">Loading your insights…</p>
         </div>
       </div>
     );
@@ -425,7 +425,7 @@ export default function CreatorDashboard() {
                 <div className="text-center py-6 space-y-2">
                   <p className="text-2xl">🤝</p>
                   <p className="text-xs text-zinc-500 max-w-sm mx-auto leading-relaxed">
-                    No followers yet. Share your profile and keep creating — people find creators through content.
+                    No followers yet. Share your profile and keep posting — people find you through your posts.
                   </p>
                 </div>
               ) : (
@@ -514,7 +514,7 @@ export default function CreatorDashboard() {
 
         {/* Privacy note */}
         <p className="text-[10px] font-mono text-zinc-600 text-center pb-6">
-          Your creator dashboard is private — analytics come from real platform activity only.
+          Your insights are private — analytics come from real platform activity only.
         </p>
       </div>
     </div>
@@ -522,8 +522,8 @@ export default function CreatorDashboard() {
 }
 
 /**
- * RevenueSection — private creator revenue overview (Master Prompt 15).
- * Reads only the creator's OWN verified ledger-derived numbers via
+ * RevenueSection — private user earnings overview.
+ * Reads only the user's OWN verified ledger-derived numbers via
  * /api/creator/revenue. Supporter identity is never shown. When monetization
  * isn't enabled on the deployment, a clear explanatory state is shown.
  */
@@ -593,7 +593,7 @@ function RevenueSection() {
           <p className="text-3xl">💰</p>
           <p className="text-sm font-bold text-zinc-300">Revenue tools aren&apos;t available yet.</p>
           <p className="text-xs text-zinc-500 max-w-sm mx-auto leading-relaxed">
-            Creator revenue activates on this deployment once monetization is enabled and a payment provider is configured. When it does, your verified earnings will appear here — supporter identities are never shown.
+            Earnings activate on this deployment once monetization is enabled and a payment provider is configured. When it does, your verified earnings will appear here — supporter identities are never shown.
           </p>
         </div>
       </Card>
@@ -666,7 +666,7 @@ function RevenueSection() {
         </p>
         <p className="mt-1">
           {data.revenueShare
-            ? `On every creator sale you keep ${data.revenueShare.creatorNetPct}% (${data.revenueShare.platformFeePct}% platform fee + ${data.revenueShare.processingPct}% payment processing). Percentages are centralized policy, never hidden.`
+            ? `On every sale you keep ${data.revenueShare.creatorNetPct}% (${data.revenueShare.platformFeePct}% platform fee + ${data.revenueShare.processingPct}% payment processing). Percentages are centralized policy, never hidden.`
             : 'You keep the largest share of every verified sale. The exact platform and processing percentages are centralized policy (never hidden) — see the platform documentation.'}
         </p>
       </div>

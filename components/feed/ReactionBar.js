@@ -43,8 +43,14 @@ export function ReactionSummary({
   const [activeReaction, setActiveReaction] = useState(participantReaction);
   const [optimisticCounts, setOptimisticCounts] = useState(null);
   const [animating, setAnimating] = useState(null);
+  const animTimerRef = React.useRef(null);
 
   const counts = optimisticCounts || reactions;
+
+  // Never fire a setState after unmount (fast navigation mid-animation).
+  useEffect(() => () => {
+    if (animTimerRef.current) clearTimeout(animTimerRef.current);
+  }, []);
 
   // Sync with prop changes
   useEffect(() => {
@@ -72,8 +78,11 @@ export function ReactionSummary({
 
     setActiveReaction(wasActive ? null : reactionKey);
     setOptimisticCounts(newCounts);
+    // Signature micro-interaction (≤420ms, transform/opacity only).
+    // Burn gets the fire pop + glow; every other reaction gets react-pop.
     setAnimating(reactionKey);
-    setTimeout(() => setAnimating(null), 400);
+    if (animTimerRef.current) clearTimeout(animTimerRef.current);
+    animTimerRef.current = setTimeout(() => setAnimating(null), 440);
 
     try {
       const res = await fetch('/api/reactions', {
@@ -108,22 +117,26 @@ export function ReactionSummary({
 
     return (
       <div className={`flex items-center gap-1.5 ${className}`}>
-        {sortedReactions.map(({ key, emoji, label, count }) => (
-          <button
-            key={key}
-            onClick={() => handleReact(key)}
-            aria-label={`${label} (${count})`}
-            aria-pressed={activeReaction === key}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-mono transition-all active:scale-90 ${
-              activeReaction === key
-                ? 'bg-[#ff4d00]/10 text-[#ff4d00] border border-[#ff4d00]/30'
-                : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
-            }`}
-          >
-            <span className="text-sm">{emoji}</span>
-            <span className="font-bold">{count >= 1000 ? `${(count / 1000).toFixed(1)}k` : count}</span>
-          </button>
-        ))}
+        {sortedReactions.map(({ key, emoji, label, count }) => {
+          const isActive = activeReaction === key;
+          const isAnimating = animating === key;
+          return (
+            <button
+              key={key}
+              onClick={() => handleReact(key)}
+              aria-label={`${label} (${count})`}
+              aria-pressed={isActive}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-mono transition-all active:scale-90 min-h-[36px] min-w-[40px] justify-center ${
+                isActive
+                  ? 'bg-[#ff4d00]/10 text-[#ff4d00] border border-[#ff4d00]/30'
+                  : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
+              } ${isAnimating && key === 'burn' ? 'fire-pop fire-glow' : ''} ${isAnimating && key !== 'burn' ? 'react-pop' : ''}`}
+            >
+              <span className={`text-sm leading-none ${isAnimating ? 'react-pop' : ''}`}>{emoji}</span>
+              <span className="font-bold">{count >= 1000 ? `${(count / 1000).toFixed(1)}k` : count}</span>
+            </button>
+          );
+        })}
       </div>
     );
   }
@@ -143,13 +156,13 @@ export function ReactionSummary({
             onClick={() => handleReact(key)}
             aria-label={`${label} (${count})`}
             aria-pressed={isActive}
-            className={`flex items-center gap-1 px-2 py-1.5 rounded-xl border text-[11px] font-mono font-bold transition-all duration-150 active:scale-90 ${
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-xl border text-[11px] font-mono font-bold transition-all duration-150 active:scale-90 min-h-[40px] min-w-[40px] justify-center ${
               isActive
                 ? activeClass
                 : 'bg-[#0a0a0a] text-zinc-400 border-[#262626] hover:border-[#3a3a3a] hover:text-white'
-            } ${isAnimating ? 'scale-110' : ''}`}
+            } ${isAnimating && key === 'burn' ? 'fire-pop fire-glow' : ''}`}
           >
-            <span className="text-sm leading-none">{emoji}</span>
+            <span className={`text-sm leading-none ${isAnimating ? 'react-pop' : ''}`}>{emoji}</span>
             {showCount && (
               <span className={`text-[10px] ${isActive ? 'font-black' : 'text-zinc-300'}`}>
                 {count >= 1000 ? `${(count / 1000).toFixed(1)}k` : count}

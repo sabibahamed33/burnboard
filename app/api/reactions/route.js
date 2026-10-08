@@ -133,6 +133,32 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Invalid participant_id' }, { status: 400 });
     }
 
+    // Interaction gating for social posts: invisible posts can't be
+    // reacted to; reactions-off posts reject new reactions (removals of
+    // pre-existing reactions are still allowed). Roast-table targets are
+    // governed by their own hot-seat visibility rules.
+    if (target_type === 'social_post') {
+      const { fetchSocialPostAccess } = await import('@/lib/photoPosts');
+      const access = await fetchSocialPostAccess(sessionClient || supabase, target_id, sessionUserId);
+      if (!access.canView) {
+        return NextResponse.json({ error: 'Content not found' }, { status: 404 });
+      }
+      if (access.permissions.reactions === 'off' && !access.isOwner && reaction_type) {
+        // Peek: only block adds/switches, not toggle-off removals.
+        const { data: mine } = await supabase
+          .from('reactions')
+          .select('id, reaction_type')
+          .eq('target_type', target_type)
+          .eq('target_id', target_id)
+          .eq('participant_id', participant_id)
+          .single();
+        const isToggleOff = mine && mine.reaction_type === reaction_type;
+        if (!isToggleOff) {
+          return NextResponse.json({ error: 'Reactions are turned off for this post.' }, { status: 403 });
+        }
+      }
+    }
+
     // Check for existing reaction from this participant on this target
     const { data: existing } = await supabase
       .from('reactions')
@@ -225,6 +251,47 @@ export async function POST(req) {
       }
     }
     counts.total = (allReactions || []).length;
+
+    // Milestone notifications for social posts/comments (hot-seat roasts
+    // notify through their own endpoint). Fire-and-forget, milestone-gated
+    // with per-milestone suppression — toggling can never re-spam.
+    if (action !== 'removed' && (target_type === 'social_post' || target_type === 'comment')) {
+      (async () => {
+        try {
+          const reader = sessionClient || supabase;
+          let authorId = null;
+          let link = null;
+          if (target_type === 'social_post') {
+            const meta = await resolveContentContext(reader, target_type, target_id);
+            authorId = meta?.author_id || null;
+            link = `/post/${target_id}`;
+          } else {
+            const { data: commentRow } = await reader
+              .from('comments')
+              .select('user_id, target_type, target_id')
+              .eq('id', target_id)
+              .maybeSingle();
+            authorId = commentRow?.user_id || null;
+            if (commentRow?.target_id) {
+              link = commentRow.target_type === 'roast'
+                ? `/r/${commentRow.target_id}`
+                : `/post/${commentRow.target_id}`;
+            }
+          }
+          if (authorId && link) {
+            const { notifySocialReactionActivity } = await import('@/lib/notifications');
+            await notifySocialReactionActivity({
+              targetType: target_type,
+              targetId: target_id,
+              totalReactions: counts.total,
+              authorId,
+              actorUserId: sessionUserId || null,
+              link,
+            });
+          }
+        } catch {}
+      })();
+    }
 
     return NextResponse.json({
       success: true,

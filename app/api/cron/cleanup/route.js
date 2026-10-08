@@ -100,6 +100,39 @@ export async function GET(request) {
     results.referralRewardsGranted = sweepResult.error ? null : (sweepResult.data || 0);
     if (sweepResult.error) results.referralRewardsError = sweepResult.error.message;
 
+    // 10. Scheduled photo posts: publish rows whose time has come.
+    // Bounded (100/run), idempotent (visibility leaves 'scheduled'),
+    // failure-safe — a missed run just publishes on the next one.
+    try {
+      const nowIso = new Date().toISOString();
+      const { data: due } = await supabase
+        .from('social_posts')
+        .select('id, visibility, metadata')
+        .eq('visibility', 'scheduled')
+        .lte('metadata->>scheduled_at', nowIso)
+        .limit(100);
+      let published = 0;
+      for (const row of due || []) {
+        try {
+          const meta = { ...(row.metadata || {}) };
+          const target = ['public', 'followers', 'only_me'].includes(meta.target_visibility)
+            ? meta.target_visibility
+            : 'public';
+          delete meta.scheduled_at;
+          meta.published_at = nowIso;
+          const { error: pubErr } = await supabase
+            .from('social_posts')
+            .update({ visibility: target, metadata: meta, updated_at: nowIso })
+            .eq('id', row.id)
+            .eq('visibility', 'scheduled');
+          if (!pubErr) published += 1;
+        } catch {}
+      }
+      results.scheduledPublished = published;
+    } catch (e) {
+      results.scheduledError = e?.message || 'scheduled sweep failed';
+    }
+
     console.log('[Cron] Cleanup completed:', results);
 
     return NextResponse.json({

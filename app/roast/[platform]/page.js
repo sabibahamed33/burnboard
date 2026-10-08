@@ -116,7 +116,7 @@ export default async function PlatformRoastPage({ params }) {
     name: params.platform,
     title: `Best ${params.platform} Roasts`,
     description: `Top brutal ${params.platform} roasts written by real humans.`,
-    heroSubtitle: `All anonymous burns for ${params.platform} creators and profiles.`,
+    heroSubtitle: `All anonymous burns for ${params.platform} users and profiles.`,
     emoji: '🔥',
   };
 
@@ -170,7 +170,7 @@ export default async function PlatformRoastPage({ params }) {
         {/* SEO Content Section with Structured Keywords */}
         <section className="bg-[#111] border border-[#222] rounded-2xl p-6 space-y-4">
           <h2 className="text-lg font-bold text-white font-mono flex items-center gap-2">
-            <span>Why {info.name} Creators Get Roasted on BURNBOARD</span>
+            <span>Why {info.name} Users Get Roasted on BURNBOARD</span>
           </h2>
           <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed">
             {info.description} Unlike generic AI-generated jokes, BURNBOARD relies 100% on real humans delivering high-IQ, brutal, anonymous burns with zero filter.

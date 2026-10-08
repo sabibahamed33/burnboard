@@ -10,6 +10,9 @@ import { subscribeRealtime } from '@/lib/realtime';
 const TYPE_CONFIG = {
   follow:           { emoji: '🤝', color: 'text-amber-400' },
   new_roast:        { emoji: '🔥', color: 'text-[#ff4d00]' },
+  comment:          { emoji: '💬', color: 'text-sky-400' },
+  reply:            { emoji: '↩️', color: 'text-sky-400' },
+  mention:          { emoji: '📣', color: 'text-amber-400' },
   reaction_activity:{ emoji: '😂', color: 'text-yellow-400' },
   burn_score_milestone: { emoji: '🔥', color: 'text-[#ff4d00]' },
   battle_invite:    { emoji: '⚔️', color: 'text-blue-400' },
@@ -106,6 +109,33 @@ export default function NotificationBell({ userId: propUserId }) {
   // after 'subscribe()'" and crashed the whole page via the error boundary.
   const isOpenRef = useRef(isOpen);
   useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
+  // Deduplication: realtime INSERTs can re-deliver (reconnects, polling
+  // overlap). One genuine event must never bump the badge twice.
+  const seenIdsRef = useRef(new Set());
+  const rememberIds = useCallback((list) => {
+    const set = seenIdsRef.current;
+    for (const n of list || []) {
+      if (n?.id) set.add(n.id);
+    }
+    // Bound memory: keep only the most recent 500 ids.
+    if (set.size > 500) {
+      const excess = set.size - 500;
+      const it = set.values();
+      for (let i = 0; i < excess; i += 1) {
+        const next = it.next();
+        if (next.done) break;
+        set.delete(next.value);
+      }
+    }
+  }, []);
+
+  // Account switching: never leak User A's notifications/badge to User B.
+  useEffect(() => {
+    seenIdsRef.current = new Set();
+    setNotifications([]);
+    setUnreadCount(0);
+    setHasLoaded(false);
+  }, [userId]);
 
   // Auto-detect userId from Supabase auth if not provided
   useEffect(() => {
@@ -157,7 +187,9 @@ export default function NotificationBell({ userId: propUserId }) {
       const res = await fetch(`/api/notifications?limit=20`);
       const data = await res.json();
       if (data.success) {
-        setNotifications(data.notifications || []);
+        const list = data.notifications || [];
+        rememberIds(list);
+        setNotifications(list);
         setUnreadCount(data.count || 0);
       }
     } catch {
@@ -166,7 +198,7 @@ export default function NotificationBell({ userId: propUserId }) {
       setLoading(false);
       setHasLoaded(true);
     }
-  }, [userId]);
+  }, [userId, rememberIds]);
 
   // ── Initial load + polling ───────────────────────────────
   useEffect(() => {
@@ -194,7 +226,13 @@ export default function NotificationBell({ userId: propUserId }) {
           .on(
             'postgres_changes',
             { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
-            () => {
+            (payload) => {
+              // Deduplicate: ignore re-delivered / already-seen events.
+              const incomingId = payload?.new?.id || null;
+              if (incomingId) {
+                if (seenIdsRef.current.has(incomingId)) return;
+                seenIdsRef.current.add(incomingId);
+              }
               setUnreadCount(prev => prev + 1);
               if (isOpenRef.current) fetchNotifications();
             }
@@ -225,6 +263,9 @@ export default function NotificationBell({ userId: propUserId }) {
 
   // ── Mark single as read ──────────────────────────────────
   const handleMarkRead = async (notificationId) => {
+    // Only decrement the badge when we know the row was unread locally —
+    // realtime/polling may have already updated the count (no double-count).
+    const wasUnread = notifications.some(n => n.id === notificationId && !n.is_read);
     try {
       await fetch('/api/notifications/read', {
         method: 'POST',
@@ -234,7 +275,9 @@ export default function NotificationBell({ userId: propUserId }) {
       setNotifications(prev =>
         prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n)
       );
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      if (wasUnread) {
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
     } catch {
       // Silent fail
     }

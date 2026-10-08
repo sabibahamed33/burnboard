@@ -65,11 +65,19 @@ export default function HotSeatCreatePage() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || 'Failed to create hot seat');
+        const msg = data.details
+          ? `${data.error} (${data.details})`
+          : data.error || 'Failed to create hot seat';
+        setError(msg);
         return;
       }
 
       setCreatedHotSeat(data.hot_seat);
+      if (data._warning || data._fallback) {
+        // Non-blocking: creation succeeded locally but DB isn't persisted.
+        // Surface once in console; success screen still shows.
+        console.warn(data._warning || 'Created with local fallback storage.');
+      }
       setStep(4); // Success screen
       
       // Track first hot seat creation for activation

@@ -4,6 +4,7 @@ import { getRequestContext } from '@/lib/routeAuth';
 import { runDeterministicPolicy, canUserPerform } from '@/lib/safety';
 import { recordSignal } from '@/lib/reco/signals';
 import { pingMilestones } from '@/lib/creator/milestones';
+import { VISIBILITY, validatePhotoMetadata } from '@/lib/photoPosts';
 
 /**
  * POST /api/content
@@ -48,7 +49,8 @@ export async function POST(req) {
     const body = await req.json();
     const {
       content_type, text, context, media_url, options, visibility,
-      community_id, challenge_id,
+      community_id, challenge_id, photo_meta, is_draft, scheduled_at,
+      target_visibility,
     } = body;
 
     // Validate content type
@@ -59,16 +61,55 @@ export async function POST(req) {
       );
     }
 
-    // Validate text
-    if (!text || !text.trim()) {
+    // Validate text (photo posts may carry an image with an empty caption)
+    const hasMedia = !!(media_url && String(media_url).trim());
+    if ((!text || !text.trim()) && !(content_type === 'photo' && hasMedia)) {
       return NextResponse.json({ error: 'Text content is required' }, { status: 400 });
     }
-    if (text.length > 500) {
+    if (text && text.length > 500) {
       return NextResponse.json(
         { error: 'Text must be 500 characters or less' },
         { status: 400 }
       );
     }
+
+    // Validate media URL shape (client uploads to our storage; we accept
+    // any https URL but never trust it beyond format + length).
+    let cleanMediaUrl = null;
+    if (hasMedia) {
+      const v = String(media_url).trim();
+      if (v.length > 2000 || !/^https:\/\/[^\s]+$/i.test(v)) {
+        return NextResponse.json({ error: 'Photo URL looks invalid.' }, { status: 400 });
+      }
+      cleanMediaUrl = v;
+    }
+
+    // Visibility allowlist. Drafts/scheduled are rest states resolved below.
+    const requestedVisibility = [VISIBILITY.PUBLIC, VISIBILITY.FOLLOWERS, VISIBILITY.ONLY_ME].includes(visibility)
+      ? visibility
+      : VISIBILITY.PUBLIC;
+
+    // Optional rich metadata — validated, never auto-filled.
+    const { meta: photoMeta, errors: metaErrors } = validatePhotoMetadata({
+      ...(photo_meta || {}),
+      ...(scheduled_at ? { scheduled_at } : {}),
+    });
+    if (metaErrors.length > 0) {
+      return NextResponse.json({ error: metaErrors[0] }, { status: 400 });
+    }
+
+    // Publishing boundary: drafts and scheduled posts are never public.
+    const wantDraft = is_draft === true;
+    const wantSchedule = !!photoMeta.scheduled_at;
+    if (wantDraft && challenge_id) {
+      return NextResponse.json({ error: 'Challenge entries cannot be saved as drafts.' }, { status: 400 });
+    }
+    const storedVisibility = wantDraft
+      ? VISIBILITY.DRAFT
+      : wantSchedule
+        ? VISIBILITY.SCHEDULED
+        : requestedVisibility;
+    const isPublished = !wantDraft && !wantSchedule;
 
     // Validate poll options
     if (content_type === 'poll') {
@@ -243,18 +284,23 @@ export async function POST(req) {
 
     // Create the social post — one canonical record. Community/challenge are
     // context only; author ownership, reactions, comments stay unified.
+    // Drafts/scheduled carry visibility='draft'/'scheduled' so RLS and every
+    // discovery surface hide them; the target visibility waits in metadata.
     const postData = {
       content_type,
-      content_text: text.trim(),
-      media_url: media_url || null,
+      content_text: (text || '').trim(),
+      media_url: cleanMediaUrl,
       metadata: {
         context: context || null,
-        visibility: visibility || 'public',
+        visibility: storedVisibility,
         community_id: resolvedCommunityId || null,
         challenge_id: challenge_id || null,
+        ...photoMeta,
+        ...(wantDraft ? { draft: true, target_visibility: requestedVisibility } : {}),
+        ...(wantSchedule ? { target_visibility: [VISIBILITY.PUBLIC, VISIBILITY.FOLLOWERS, VISIBILITY.ONLY_ME].includes(target_visibility) ? target_visibility : requestedVisibility } : {}),
       },
       user_id: resolvedUserId,
-      visibility: visibility || 'public',
+      visibility: storedVisibility,
       community_id: resolvedCommunityId || null,
       challenge_id: challenge_id || null,
     };
@@ -311,14 +357,14 @@ export async function POST(req) {
       }
     }
 
-    // Creator milestone check: a real post was published (first post,
-    // 10 posts, … — recomputed server-side, fire-and-forget).
-    if (resolvedUserId && contextClient) {
+    // Creator milestone check: only for actually published posts —
+    // drafts/scheduled must never earn milestones or reputation.
+    if (isPublished && resolvedUserId && contextClient) {
       pingMilestones(contextClient, resolvedUserId).catch(() => {});
     }
 
-    // Award reputation for content creation
-    if (resolvedUserId) {
+    // Award reputation for content creation (published posts only)
+    if (isPublished && resolvedUserId) {
       try {
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
           method: 'POST',
@@ -408,17 +454,18 @@ export async function POST(req) {
       }
     }
 
-    // Growth analytics (non-critical)
+    // Growth analytics (non-critical, published posts only — drafts and
+    // scheduled posts stay invisible to every surface until published)
     try {
       const events = [];
-      if (resolvedCommunityId) {
+      if (isPublished && resolvedCommunityId) {
         events.push({
           eventType: 'community_content_created',
           subjectId: resolvedUserId,
           metadata: { communityId: resolvedCommunityId, postId: post.id },
         });
       }
-      if (challenge) {
+      if (isPublished && challenge) {
         events.push({
           eventType: 'challenge_participated',
           subjectId: resolvedUserId,

@@ -59,6 +59,19 @@ async function getHandler(req) {
       return NextResponse.json({ error: 'Missing target_type or target_id' }, { status: 400 });
     }
 
+    // Private/restricted posts stay private: their conversations are not
+    // listable by unauthorized viewers (404, same as the post itself).
+    if (targetType === 'social_post') {
+      try {
+        const { fetchSocialPostAccess } = await import('@/lib/photoPosts');
+        const session = await getRequestContext(req);
+        const access = await fetchSocialPostAccess(session?.client || supabase, targetId, session?.userId || null);
+        if (!access.canView) {
+          return NextResponse.json({ comments: [], hasMore: false });
+        }
+      } catch {}
+    }
+
     // Fetch top-level comments (no parent_id)
     let query = supabase
       .from('comments')
@@ -221,6 +234,19 @@ async function postHandler(req) {
     const session = await getRequestContext(req);
     const sessionUserId = session?.userId || user?.id || null;
 
+    // Interaction gating: private/restricted posts stay private.
+    // Comments off → only the owner may still comment (owner bypass).
+    if (target_type === 'social_post') {
+      const { fetchSocialPostAccess } = await import('@/lib/photoPosts');
+      const access = await fetchSocialPostAccess(session?.client || supabase, target_id, sessionUserId);
+      if (!access.canView) {
+        return NextResponse.json({ error: 'Comments not found' }, { status: 404 });
+      }
+      if (access.permissions.comments === 'off' && !access.isOwner) {
+        return NextResponse.json({ error: 'Comments are turned off for this post.' }, { status: 403 });
+      }
+    }
+
     // ── Safety pipeline (Master Prompt 11) ─────────────────────
     // 1) Account restriction check (server-side; a hidden button is not
     //    enforcement). Applies to signed-in commenters.
@@ -314,6 +340,26 @@ async function postHandler(req) {
           if (meta?.author_id) {
             await pingMilestones(session.client, meta.author_id);
           }
+        } catch {}
+      })();
+    }
+
+    // Engagement notifications: reply → parent author, top-level comment →
+    // content author, @mentions → mentioned users. Fire-and-forget: a
+    // notification failure must never fail the comment itself. Anonymous
+    // comments carry no verifiable identity and never notify.
+    if (sessionUserId) {
+      (async () => {
+        try {
+          const { notifyCommentActivity } = await import('@/lib/notifications');
+          await notifyCommentActivity({
+            commentId: comment.id,
+            targetType: target_type,
+            targetId: target_id,
+            authorId: sessionUserId,
+            parentCommentId: parent_id || null,
+            text: text.trim(),
+          });
         } catch {}
       })();
     }

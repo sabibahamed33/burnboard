@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { cacheAside, CACHE_TTL } from '@/lib/cache';
 import { createLogger } from '@/lib/logger';
+import { getFallbackSeat, listFallbackRoasts, listFallbackReactions, isFallbackId } from '@/lib/hotSeatFallback';
 
 const log = createLogger('hot-seat-detail');
 
@@ -13,6 +14,22 @@ export async function GET(req, { params }) {
 
     if (!id) {
       return NextResponse.json({ error: 'Missing hot seat ID' }, { status: 400 });
+    }
+
+    // Local fallback seats (created while DB tables are missing) — serve directly
+    if (isFallbackId(id)) {
+      const seat = getFallbackSeat(id);
+      if (!seat) {
+        return NextResponse.json({ error: 'Hot seat not found' }, { status: 404 });
+      }
+      const { reactions: reactionCounts } = listFallbackReactions(id, null);
+      return NextResponse.json({
+        success: true,
+        hot_seat: seat,
+        roasts: listFallbackRoasts(id),
+        reactionCounts,
+        _fallback: true,
+      });
     }
 
     if (!isSupabaseConfigured || !supabase) {

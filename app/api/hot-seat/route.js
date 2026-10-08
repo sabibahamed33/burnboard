@@ -5,6 +5,7 @@ import { isProfane } from '@/lib/filter';
 import { track } from '@/lib/analytics';
 import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
 import { createLogger } from '@/lib/logger';
+import { createFallbackSeat, isMissingTableError } from '@/lib/hotSeatFallback';
 
 const log = createLogger('hot-seat-create');
 
@@ -108,9 +109,6 @@ export async function POST(req) {
       }
     }
 
-    // Generate unique slug
-    const slug = generateSlug();
-
     if (isSupabaseConfigured && supabase) {
       const newHotSeat = {
         display_name: (display_name || 'Anonymous').trim().slice(0, 40),
@@ -132,7 +130,47 @@ export async function POST(req) {
 
       if (insertError) {
         console.error('[HotSeat] Insert error:', insertError);
-        return NextResponse.json({ error: 'Failed to create hot seat' }, { status: 500 });
+
+        // Fresh Supabase project without tables applied yet (PGRST205) —
+        // fall back to local in-memory seat so localhost/dev keeps working.
+        // Run supabase/bootstrap.sql in the Supabase SQL Editor for persistence.
+        if (isMissingTableError(insertError)) {
+          log.warn('hot_seats table missing, using local fallback. Run supabase/bootstrap.sql in Supabase SQL Editor.', {
+            code: insertError.code,
+          });
+          const fallback = createFallbackSeat({
+            category,
+            title,
+            context,
+            heat_level,
+            display_name,
+          });
+          track('hot_seat_created', {
+            hot_seat_id: fallback.id,
+            category,
+            heat_level: heat_level || 'savage',
+            from_challenge: !!challenge_token,
+            fallback: true,
+          });
+          return NextResponse.json({
+            success: true,
+            hot_seat: {
+              ...fallback,
+              challenge_completed: !!challenge_token,
+            },
+            _fallback: true,
+            _warning: 'Database tables not set up yet — using temporary local storage. Run supabase/bootstrap.sql in Supabase SQL Editor for persistence.',
+          });
+        }
+
+        const isDev = process.env.NODE_ENV !== 'production';
+        return NextResponse.json(
+          {
+            error: 'Failed to create hot seat',
+            ...(isDev ? { details: insertError.message, code: insertError.code } : {}),
+          },
+          { status: 500 }
+        );
       }
 
       // If this hot seat was created from a challenge, complete the challenge
@@ -164,44 +202,40 @@ export async function POST(req) {
       });
     }
 
-    // Dev fallback
-    const fallbackId = 'hs-' + Date.now();
+    // Dev fallback (Supabase not configured) — store in-memory so detail view works
+    const fallback = createFallbackSeat({
+      category,
+      title,
+      context,
+      heat_level,
+      display_name,
+    });
     track('hot_seat_created', {
-      hot_seat_id: fallbackId,
+      hot_seat_id: fallback.id,
       category,
       heat_level: heat_level || 'savage',
       from_challenge: !!challenge_token,
+      fallback: true,
     });
     return NextResponse.json({
       success: true,
       hot_seat: {
-        id: fallbackId,
-        slug: fallbackId,
-        display_name: (display_name || 'Anonymous').trim().slice(0, 40),
-        category,
-        title: title.trim().slice(0, 200),
-        context: (context || '').trim().slice(0, 500),
-        heat_level: heat_level || 'savage',
-        status: 'active',
-        creator_id: null,
-        roast_count: 0,
-        image_url: null,
-        created_at: new Date().toISOString(),
-        share_url: `/hot-seat/${fallbackId}`,
+        ...fallback,
         challenge_completed: !!challenge_token,
-      }
+      },
+      _fallback: true,
     });
   } catch (err) {
     console.error('[HotSeat] Error:', err);
+    if (isMissingTableError(err)) {
+      return NextResponse.json(
+        {
+          error: 'Database tables not set up yet. Run supabase/bootstrap.sql in the Supabase SQL Editor, then try again.',
+          code: err.code || 'PGRST205',
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
-
-function generateSlug() {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let slug = '';
-  for (let i = 0; i < 8; i++) {
-    slug += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return slug;
 }

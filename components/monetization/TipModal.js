@@ -85,7 +85,7 @@ export default function TipModal({ open, onClose, creatorId, creatorName }) {
       onClick={handleBackdrop}
       role="dialog"
       aria-modal="true"
-      aria-label={`Support @${creatorName || 'this creator'}`}
+      aria-label={`Support @${creatorName || 'this user'}`}
     >
       <div className="w-full max-w-sm bg-[#111] border border-[#333] rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
@@ -93,7 +93,7 @@ export default function TipModal({ open, onClose, creatorId, creatorName }) {
           <div className="flex items-center gap-2">
             <Gift className="w-4 h-4 text-[#ff4d00]" />
             <h2 className="text-sm font-black text-white uppercase tracking-wider font-mono">
-              Support @{creatorName || 'creator'}
+              Support @{creatorName || 'user'}
             </h2>
           </div>
           <button
@@ -109,7 +109,7 @@ export default function TipModal({ open, onClose, creatorId, creatorName }) {
           {signedOut ? (
             <div className="text-center space-y-3 py-4">
               <p className="text-xs text-zinc-400 leading-relaxed">
-                Sign in to support creators. It&apos;s free to join and takes seconds.
+                Sign in to support users. It&apos;s free to join and takes seconds.
               </p>
               <a
                 href="/auth"
@@ -126,16 +126,16 @@ export default function TipModal({ open, onClose, creatorId, creatorName }) {
             <div className="text-center space-y-2 py-4">
               <p className="text-2xl">🔧</p>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                {data?.error || 'Tips aren&apos;t available for this creator yet.'}
+                {data?.error || 'Tips aren&apos;t available for this user yet.'}
               </p>
               <p className="text-[10px] font-mono text-zinc-600">
-                Creators activate support once monetization is enabled on this deployment.
+                Users activate support once monetization is enabled on this deployment.
               </p>
             </div>
           ) : (
             <>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                A voluntary one-time tip — a genuine thank-you with no hidden terms. It goes directly to the creator (minus the standard platform fee).
+                A voluntary one-time tip — a genuine thank-you with no hidden terms. It goes directly to the user (minus the standard platform fee).
               </p>
 
               <div className="grid grid-cols-2 gap-2">

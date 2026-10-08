@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
+import { isFallbackId, getFallbackSeat, listFallbackReactions } from '@/lib/hotSeatFallback';
 
 export async function GET(req, { params }) {
   try {
@@ -10,6 +11,15 @@ export async function GET(req, { params }) {
 
     if (!id) {
       return NextResponse.json({ error: 'Missing hot seat ID' }, { status: 400 });
+    }
+
+    // Local fallback seats (tables missing / DB not configured) — read in-memory
+    if (isFallbackId(id)) {
+      if (!getFallbackSeat(id)) {
+        return NextResponse.json({ error: 'Hot seat not found' }, { status: 404 });
+      }
+      const { reactions, participantReactions } = listFallbackReactions(id, participantId);
+      return NextResponse.json({ success: true, reactions, participantReactions, _fallback: true });
     }
 
     if (!isSupabaseConfigured || !supabase) {

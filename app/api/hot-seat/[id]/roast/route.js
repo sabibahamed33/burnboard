@@ -4,6 +4,7 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { isProfane } from '@/lib/filter';
 import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
 import { createLogger } from '@/lib/logger';
+import { getFallbackSeat, createFallbackRoast, isFallbackId, isMissingTableError } from '@/lib/hotSeatFallback';
 
 const log = createLogger('hot-seat-roast');
 
@@ -58,6 +59,21 @@ export async function POST(req, { params }) {
       );
     }
 
+    // Local fallback seats (DB missing or not configured) — store roast in-memory.
+    // This must run before the DB branches so fallback seats never depend on
+    // Supabase being set up. A fallback ID that is unknown here means the seat
+    // is gone (e.g. dev server restarted) — 404 instead of a confusing 503.
+    if (isFallbackId(id)) {
+      if (getFallbackSeat(id)) {
+        const roast = createFallbackRoast(id, { roast_text, anon_id });
+        if (!roast) {
+          return NextResponse.json({ error: 'Hot seat not found' }, { status: 404 });
+        }
+        return NextResponse.json({ success: true, roast, _fallback: true });
+      }
+      return NextResponse.json({ error: 'Hot seat not found' }, { status: 404 });
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
     }
@@ -70,6 +86,12 @@ export async function POST(req, { params }) {
       .single();
 
     if (seatError || !hotSeat) {
+      if (isMissingTableError(seatError)) {
+        return NextResponse.json(
+          { error: 'Database tables not set up yet. Run supabase/bootstrap.sql in the Supabase SQL Editor, then try again.', code: seatError.code },
+          { status: 503 }
+        );
+      }
       return NextResponse.json({ error: 'Hot seat not found' }, { status: 404 });
     }
 

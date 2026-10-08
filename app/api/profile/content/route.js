@@ -1,15 +1,25 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getRequestContext } from '@/lib/routeAuth';
+import { transformSocialPostItem } from '@/lib/reco/items';
+import { attachTaggedUsers } from '@/lib/reco/feedBuilder';
+import { canViewPost } from '@/lib/photoPosts';
 
 /**
  * GET /api/profile/content
- * 
- * Get content created by a user (social_posts + roasts).
- * 
+ *
+ * Get content created by a user (social_posts).
+ *
  * Query params:
- *   - user_id: string (required)
+ *   - user_id: string (required) — profile owner
  *   - cursor: ISO timestamp for pagination
  *   - limit: number (default: 20, max: 50)
+ *   - filter: 'published' (default) | 'drafts' (owner only — private
+ *     drafts/scheduled posts for the creator's own drafts shelf)
+ *
+ * Visibility: public rows for everyone; followers-only rows for followers
+ * and the owner; drafts/scheduled/only_me for the owner only (via
+ * ?filter=drafts). Anonymous reads see public posts only.
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
@@ -22,8 +32,8 @@ function getSupabase() {
 
 export async function GET(req) {
   try {
-    const supabase = getSupabase();
-    if (!supabase) {
+    const anon = getSupabase();
+    if (!anon) {
       return NextResponse.json({ items: [], hasMore: false });
     }
 
@@ -31,13 +41,22 @@ export async function GET(req) {
     const userId = searchParams.get('user_id');
     const cursor = searchParams.get('cursor');
     const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 50);
+    const draftsOnly = searchParams.get('filter') === 'drafts';
 
     if (!userId) {
       return NextResponse.json({ error: 'Missing user_id' }, { status: 400 });
     }
 
-    // Fetch social posts
-    let postQuery = supabase
+    const { client: sessionClient, userId: viewerId } = await getRequestContext(req);
+    const db = sessionClient || anon;
+    const isOwner = !!viewerId && viewerId === userId;
+
+    // Drafts shelf is strictly owner-only.
+    if (draftsOnly && !isOwner) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    let postQuery = db
       .from('social_posts')
       .select(`
         *,
@@ -48,6 +67,10 @@ export async function GET(req) {
       .order('created_at', { ascending: false })
       .limit(limit + 1);
 
+    if (draftsOnly) {
+      postQuery = postQuery.in('visibility', ['draft', 'scheduled']);
+    }
+
     if (cursor) {
       postQuery = postQuery.lt('created_at', cursor);
     }
@@ -56,42 +79,33 @@ export async function GET(req) {
 
     if (postError) {
       console.error('[Profile Content] Error:', postError);
-      return NextResponse.json({ items: [], hasMore: false, error: postError.message });
+      return NextResponse.json({ items: [], hasMore: false, error: 'Unable to load content right now.' });
     }
 
-    const hasMore = (posts || []).length > limit;
-    const items = (posts || []).slice(0, limit);
+    // App-layer visibility gate (defense in depth over RLS): resolve
+    // follow status once for the whole page, then filter.
+    let isFollower = false;
+    if (!isOwner && viewerId && (posts || []).some((p) => p.visibility === 'followers')) {
+      const { data: follow } = await db
+        .from('follows')
+        .select('id')
+        .eq('follower_id', viewerId)
+        .eq('following_id', userId)
+        .maybeSingle();
+      isFollower = !!follow;
+    }
 
-    // Transform posts into feed items
-    const feedItems = items.map(post => ({
-      id: post.id,
-      type: post.content_type,
-      text: post.content_text,
-      mediaUrl: post.media_url,
-      context: post.metadata?.context || null,
-      author: {
-        id: post.user_profiles?.id,
-        username: post.user_profiles?.username,
-        displayName: post.user_profiles?.display_name,
-        avatarLetter: post.user_profiles?.username?.[0]?.toUpperCase() || '?',
-        avatarColor: null,
-        tagline: post.user_profiles?.bio,
-      },
-      reactions: { funny: 0, savage: 0, fatal: 0 },
-      totalReactions: 0,
-      upvotes: post.upvote_count || 0,
-      userId: post.user_id,
-      createdAt: post.created_at,
-      poll: post.polls?.[0] || null,
-    }));
+    const visible = (posts || []).filter((p) => canViewPost(p, viewerId, isFollower || isOwner));
+    const hasMore = visible.length > limit;
+    const items = await attachTaggedUsers(db, visible.slice(0, limit).map(transformSocialPostItem));
 
-    const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].created_at : null;
+    const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].createdAt : null;
 
     return NextResponse.json({
-      items: feedItems,
+      items,
       hasMore,
       nextCursor,
-      count: feedItems.length,
+      count: items.length,
     });
   } catch (err) {
     console.error('[Profile Content] Error:', err);

@@ -2,7 +2,8 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowBigUp, MessageSquare, MoreHorizontal, BarChart3, MinusCircle, EyeOff, Ban, Sparkles, Gift } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowBigUp, MessageSquare, MoreHorizontal, BarChart3, MinusCircle, EyeOff, Ban, Sparkles, Gift, Pencil, Trash2 } from 'lucide-react';
 import Avatar from '@/components/ui/Avatar';
 import Badge from '@/components/ui/Badge';
 import { ReactionSummary, getParticipantId } from './ReactionBar';
@@ -10,6 +11,13 @@ import PollCard from './PollCard';
 import SafetyActions from '@/components/safety/SafetyActions';
 import ShareButton from '@/components/growth/ShareButton';
 import TipModal from '@/components/monetization/TipModal';
+import CommentSheet from '@/components/comments/CommentSheet';
+import PhotoMetaChips from './PhotoMetaChips';
+import SaveButton from './SaveButton';
+import BottomSheet from '@/components/ui/BottomSheet';
+import PhotoComposer from '@/components/create/PhotoComposer';
+import { useViewerId } from '@/lib/identity';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 /**
  * FeedCard — Universal content card for BurnBoard's social feed.
@@ -77,6 +85,40 @@ function getDetailHref(item) {
   return `/post/${item.id}`;
 }
 
+// Split text into plain spans + navigable #hashtag / @mention links.
+// Keeps the discovery graph alive: roast → hashtag → search → creators.
+function renderRichText(text) {
+  if (!text) return null;
+  const parts = String(text).split(/(#[\p{L}\p{N}_]{2,40}|@[A-Za-z0-9_]{3,20})/gu);
+  return parts.map((part, i) => {
+    if (part.startsWith('#') && part.length > 2) {
+      return (
+        <Link
+          key={i}
+          href={`/search?q=${encodeURIComponent(part)}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-[#ff4d00] hover:underline"
+        >
+          {part}
+        </Link>
+      );
+    }
+    if (part.startsWith('@') && part.length > 1 && /@[A-Za-z0-9_]{3,20}$/.test(part)) {
+      return (
+        <Link
+          key={i}
+          href={`/u/${part.slice(1)}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-[#ff4d00] hover:underline"
+        >
+          {part}
+        </Link>
+      );
+    }
+    return <React.Fragment key={i}>{part}</React.Fragment>;
+  });
+}
+
 export default function FeedCard({
   item,
   onReaction,
@@ -86,14 +128,25 @@ export default function FeedCard({
   onRemoveFromCommunity,
   onNotInterested,
   onHide,
+  onDeleted,
+  onUpdated,
   className = '',
 }) {
   const [upvoted, setUpvoted] = useState(false);
   const [upvoteCount, setUpvoteCount] = useState(item.upvotes || 0);
   const [showMenu, setShowMenu] = useState(false);
   const [showTip, setShowTip] = useState(false);
+  const [showComments, setShowComments] = useState(false);
   const [reactions, setReactions] = useState(item.reactions || {});
   const [participantReaction, setParticipantReaction] = useState(null);
+  const [showEdit, setShowEdit] = useState(false);
+  const [ownerBusy, setOwnerBusy] = useState(false);
+  const router = useRouter();
+  // Owner-only post controls (edit / unpublish / delete). Server
+  // re-verifies ownership — this only controls UI visibility.
+  const { viewerId } = useViewerId();
+  const isOwner = !!viewerId && !!item.userId && viewerId === item.userId;
+  const isEditablePost = item.type !== 'roast' && item.type !== 'poll';
 
   const typeConfig = CONTENT_TYPE_CONFIG[item.type] || CONTENT_TYPE_CONFIG.roast;
   const platformBadge = item.author?.platform ? getPlatformBadge(item.author.platform) : null;
@@ -143,10 +196,79 @@ export default function FeedCard({
     onUpvote?.(item);
   }, [upvoted, item, onUpvote]);
 
+  // Owner: unpublish (hide everywhere, keep as draft).
+  const handleUnpublish = useCallback(async () => {
+    if (ownerBusy) return;
+    setOwnerBusy(true);
+    setShowMenu(false);
+    try {
+      const res = await fetch(`/api/content/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visibility: 'draft' }),
+      });
+      if (res.ok) {
+        onDeleted?.(item); // leaves every public surface immediately
+      }
+    } catch {} finally {
+      setOwnerBusy(false);
+    }
+  }, [ownerBusy, item, onDeleted]);
+
+  // Owner: delete permanently (with confirmation).
+  const handleDelete = useCallback(async () => {
+    if (ownerBusy) return;
+    if (typeof window !== 'undefined' && !window.confirm('Delete this post permanently?')) return;
+    setOwnerBusy(true);
+    setShowMenu(false);
+    try {
+      const res = await fetch(`/api/content/${item.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        onDeleted?.(item);
+      }
+    } catch {} finally {
+      setOwnerBusy(false);
+    }
+  }, [ownerBusy, item, onDeleted]);
+
+  // Owner: merge a PATCHed row back into the feed item shape.
+  const handleSaved = useCallback(async (updated) => {
+    let taggedUsers = item.taggedUsers || [];
+    const tids = updated.metadata?.tagged_user_ids || [];
+    if (tids.length && isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase
+          .from('user_profiles')
+          .select('id, username, display_name')
+          .in('id', tids.slice(0, 10));
+        if (data) {
+          taggedUsers = data.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name }));
+        }
+      } catch {}
+    } else if (!tids.length) {
+      taggedUsers = [];
+    }
+    setShowEdit(false);
+    onUpdated?.({
+      ...item,
+      text: updated.content_text ?? item.text,
+      mediaUrl: updated.media_url ?? item.mediaUrl,
+      visibility: updated.visibility || item.visibility,
+      metadata: updated.metadata || item.metadata,
+      taggedUsers,
+    });
+  }, [item, onUpdated]);
+
   const detailHref = getDetailHref(item);
   const shareUrl = typeof window !== 'undefined'
     ? `${window.location.origin}${detailHref}`
     : detailHref;
+  // User-published interaction permissions (default: everything on).
+  const perms = item.metadata?.permissions || {};
+  const reactionsOff = perms.reactions === 'off';
+  const commentsOff = perms.comments === 'off';
+  const sharingOff = perms.sharing === 'off';
+  const savingOff = perms.saving === 'off';
 
   return (
     <article
@@ -189,13 +311,48 @@ export default function FeedCard({
         <div className="relative">
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="p-1.5 rounded-lg hover:bg-[#1a1a1a] transition-colors text-zinc-500 hover:text-white"
+            className="p-1.5 rounded-lg hover:bg-[#1a1a1a] transition-colors text-zinc-500 hover:text-white min-h-[36px] min-w-[36px] flex items-center justify-center"
             aria-label="More options"
+            aria-expanded={showMenu}
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
           {showMenu && (
             <div className="absolute right-0 top-full mt-1 w-52 bg-[#1a1a1a] border border-[#333] rounded-xl shadow-2xl z-10 overflow-hidden">
+              {/* Owner controls — server re-verifies ownership */}
+              {isOwner && item.userId && item.type !== 'roast' && (
+                <>
+                  {isEditablePost && (
+                    <button
+                      onClick={() => {
+                        setShowMenu(false);
+                        setShowEdit(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-zinc-300 hover:bg-[#ff4d00]/10 hover:text-[#ff4d00] transition-colors min-h-[44px]"
+                    >
+                      <Pencil className="w-3.5 h-3.5 shrink-0" />
+                      Edit post
+                    </button>
+                  )}
+                  <button
+                    onClick={handleUnpublish}
+                    disabled={ownerBusy}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-zinc-300 hover:bg-[#1f1f1f] hover:text-white transition-colors disabled:opacity-50 min-h-[44px]"
+                  >
+                    <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                    Unpublish (draft)
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={ownerBusy}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50 min-h-[44px]"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                    Delete post
+                  </button>
+                  <div className="my-1 border-t border-[#262626]" />
+                </>
+              )}
               {/* Personalized feed controls — real, affect future ranking */}
               {onNotInterested && (
                 <button
@@ -224,7 +381,7 @@ export default function FeedCard({
               {(onNotInterested || onHide) && (
                 <div className="my-1 border-t border-[#262626]" />
               )}
-              {/* Voluntary creator support — real tips, verified server-side */}
+              {/* Voluntary user support — real tips, verified server-side */}
               {item.userId && (
                 <button
                   onClick={() => {
@@ -234,7 +391,7 @@ export default function FeedCard({
                   className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-zinc-300 hover:bg-[#ff4d00]/10 hover:text-[#ff4d00] transition-colors"
                 >
                   <Gift className="w-3.5 h-3.5 shrink-0" />
-                  Support this creator
+                  Support this user
                 </button>
               )}
               {onRemoveFromCommunity && (
@@ -266,6 +423,28 @@ export default function FeedCard({
         creatorName={item.author?.username || item.author?.displayName}
       />
 
+      {/* Conversation sheet — join without leaving the feed */}
+      <CommentSheet
+        open={showComments}
+        onClose={() => setShowComments(false)}
+        targetType={item.type === 'roast' ? 'roast' : 'social_post'}
+        targetId={item.id}
+        detailHref={detailHref}
+      />
+
+      {/* Owner edit sheet */}
+      {isOwner && isEditablePost && (
+        <BottomSheet open={showEdit} onClose={() => setShowEdit(false)} title="Edit post">
+          {showEdit && (
+            <PhotoComposer
+              initialPost={item}
+              onSaved={handleSaved}
+              onBack={() => setShowEdit(false)}
+            />
+          )}
+        </BottomSheet>
+      )}
+
       {/* Product-level explanation for personalized feeds (truthful, no scores) */}
       {item.explanation?.text && (
         <div className="px-4 pt-2">
@@ -276,23 +455,37 @@ export default function FeedCard({
         </div>
       )}
 
-      {/* Content */}
-      <div className="px-4 py-3">
-        <Link href={detailHref}>
+      {/* Content — the roast is the hero: generous type + breathing room.
+          Navigable container (not a nested Link) so inline #hashtag and
+          @mention links work without invalid nested anchors. */}
+      <div className="px-4 py-4">
+        <div
+          role="link"
+          tabIndex={0}
+          aria-label="Open details"
+          onClick={() => router.push(detailHref)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              router.push(detailHref);
+            }
+          }}
+          className="cursor-pointer"
+        >
           {item.type === 'roast' ? (
-            <p className="text-sm text-zinc-100 leading-relaxed select-text hover:text-white transition-colors">
-              &ldquo;{item.text}&rdquo;
+            <p className="text-[15px] text-zinc-100 leading-[1.75] select-text hover:text-white transition-colors">
+              &ldquo;{renderRichText(item.text)}&rdquo;
             </p>
           ) : item.type === 'hot_take' ? (
-            <p className="text-base font-bold text-white leading-relaxed select-text hover:text-[#ff4d00] transition-colors">
-              {item.text}
+            <p className="text-[17px] font-bold text-white leading-[1.65] select-text hover:text-[#ff4d00] transition-colors">
+              {renderRichText(item.text)}
             </p>
           ) : (
-            <p className="text-sm text-zinc-100 leading-relaxed select-text hover:text-white transition-colors">
-              {item.text}
+            <p className="text-[15px] text-zinc-100 leading-[1.7] select-text hover:text-white transition-colors">
+              {renderRichText(item.text)}
             </p>
           )}
-        </Link>
+        </div>
 
         {/* Context */}
         {item.context && (
@@ -306,6 +499,9 @@ export default function FeedCard({
           </div>
         )}
 
+        {/* Optional user-published metadata (only renders when present) */}
+        <PhotoMetaChips metadata={item.metadata} taggedUsers={item.taggedUsers} />
+
         {/* Poll */}
         {item.type === 'poll' && item.poll && (
           <div className="mt-3">
@@ -314,14 +510,14 @@ export default function FeedCard({
         )}
       </div>
 
-      {/* Interaction Bar */}
+      {/* Interaction Bar — user permissions gate each control */}
       <div className="px-4 pb-4">
         <div className="flex items-center justify-between pt-3 border-t border-[#1a1a1a]">
           {/* Upvote */}
           <button
             onClick={handleUpvote}
             disabled={upvoted}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-black transition-all duration-150 active:scale-90 ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-black transition-all duration-150 active:scale-90 min-h-[36px] ${
               upvoted
                 ? 'bg-[#ff4d00] text-black border-[#ff4d00] shadow-[0_0_12px_rgba(255,77,0,0.4)]'
                 : 'bg-[#0a0a0a] text-zinc-400 border-[#262626] hover:text-white hover:border-[#3a3a3a]'
@@ -333,7 +529,7 @@ export default function FeedCard({
           </button>
 
           {/* Reactions (7 types, compact) */}
-          {item.type !== 'poll' && (
+          {item.type !== 'poll' && !reactionsOff && (
             <ReactionSummary
               itemId={item.id}
               targetType={item.type === 'roast' ? 'roast' : 'social_post'}
@@ -341,6 +537,9 @@ export default function FeedCard({
               participantReaction={participantReaction}
               compact
             />
+          )}
+          {item.type !== 'poll' && reactionsOff && (
+            <span className="text-[10px] font-mono text-zinc-600">Reactions off</span>
           )}
 
           {/* Poll vote count */}
@@ -353,24 +552,36 @@ export default function FeedCard({
 
           {/* Actions */}
           <div className="flex items-center gap-1">
-            <Link
-              href={detailHref}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-mono text-zinc-400 hover:text-white hover:bg-[#1a1a1a] transition-all"
-              aria-label="View details"
+            <button
+              onClick={() => {
+                if (!commentsOff) setShowComments(true);
+              }}
+              disabled={commentsOff}
+              title={commentsOff ? 'Comments are turned off for this post' : undefined}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-mono text-zinc-400 hover:text-white hover:bg-[#1a1a1a] transition-all min-h-[36px] disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
+              aria-label={item.commentCount > 0 ? `Join the conversation (${item.commentCount} comments)` : 'Join the conversation'}
             >
               <MessageSquare className="w-3.5 h-3.5" />
-            </Link>
-            <ShareButton
-              resourceType={item.type === 'roast' ? 'roast' : 'social_post'}
-              resourceId={item.id}
-              url={shareUrl}
-              title="🔥 BurnBoard"
-              text={`"${item.text}" — via BurnBoard`}
-              variant="ghost"
-              label="Share"
-              className="px-2.5 py-1.5 text-xs"
-              onShared={() => onShare?.(item)}
-            />
+              {item.commentCount > 0 && (
+                <span className="font-bold">{formatCount(item.commentCount)}</span>
+              )}
+            </button>
+            {!sharingOff && (
+              <ShareButton
+                resourceType={item.type === 'roast' ? 'roast' : 'social_post'}
+                resourceId={item.id}
+                url={shareUrl}
+                title="🔥 BurnBoard"
+                text={`"${item.text}" — via BurnBoard`}
+                variant="ghost"
+                label="Share"
+                className="px-2.5 py-1.5 text-xs"
+                onShared={() => onShare?.(item)}
+              />
+            )}
+            {item.type !== 'poll' && item.type !== 'roast' && (
+              <SaveButton postId={item.id} disabled={savingOff} />
+            )}
           </div>
         </div>
       </div>

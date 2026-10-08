@@ -148,7 +148,7 @@ function DigestPanel() {
             <div key={`${item.kind}-${item.id}`} className="bg-[#18181c] border border-[#26262c] rounded-lg p-3">
               <p className="text-zinc-300 text-sm">{item.text || '(media post)'}</p>
               <p className="text-[10px] text-zinc-600 mt-1 font-mono uppercase">
-                {item.kind === 'creator_post' ? 'from a creator you follow' : 'in a community you joined'}
+                {item.kind === 'creator_post' ? 'from a user you follow' : 'in a community you joined'}
               </p>
             </div>
           ))}

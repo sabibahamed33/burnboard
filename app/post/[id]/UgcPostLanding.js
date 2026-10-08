@@ -30,10 +30,15 @@ export default function UgcPostLanding({ post }) {
     reactions: {},
     totalReactions: 0,
     upvotes: post.upvote_count || 0,
+    commentCount: post.comment_count || 0,
     userId: post.user_id,
+    visibility: post.visibility || 'public',
+    metadata: post.metadata || {},
+    taggedUsers: post.taggedUsers || [],
     createdAt: post.created_at,
     poll: post.polls?.[0] || null,
   };
+  const sharingOff = item.metadata?.permissions?.sharing === 'off';
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
@@ -46,15 +51,17 @@ export default function UgcPostLanding({ post }) {
             <ArrowLeft className="w-4 h-4" />
             <span>Back to Feed</span>
           </Link>
-          <ShareButton
-            resourceType="social_post"
-            resourceId={post.id}
-            url={typeof window !== 'undefined' ? window.location.href : `https://burnboard.app/post/${post.id}`}
-            title="🔥 BurnBoard"
-            text={`"${post.content_text || ''}" — via BurnBoard`}
-            variant="ghost"
-            label="Share"
-          />
+          {!sharingOff && (
+            <ShareButton
+              resourceType="social_post"
+              resourceId={post.id}
+              url={typeof window !== 'undefined' ? window.location.href : `https://burnboard.app/post/${post.id}`}
+              title="🔥 BurnBoard"
+              text={`"${post.content_text || ''}" — via BurnBoard`}
+              variant="ghost"
+              label="Share"
+            />
+          )}
         </div>
 
         <FeedCard item={item} />
