@@ -41,8 +41,11 @@ const VALID_EVENT_TYPES = [
   'share_cta_viewed',
   'share_initiated',
   'share_completed',
+  'first_share_completed',
   'challenge_created',
   'referral_conversion',
+  'referral_activated',
+  'invite_created',
   
   // Retention
   'notification_opened',

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
 
 /**
  * GET /api/referral/visit?code=xxx
@@ -21,6 +22,12 @@ function getSupabase() {
 export async function GET(request) {
   const supabase = getSupabase();
   if (!supabase) {
+    return NextResponse.json({ tracked: false });
+  }
+
+  // Per-IP gate in front of the SQL per-code cap (layered anti-farm).
+  const ipLimit = rateLimitMiddleware(ipKey(getClientIp(request), 'referral_visit'), RATE_LIMITS.REFERRAL_VISIT);
+  if (ipLimit.blocked) {
     return NextResponse.json({ tracked: false });
   }
 

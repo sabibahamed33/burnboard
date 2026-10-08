@@ -43,6 +43,7 @@ export async function generateMetadata({ params }) {
 
     const title = `${challenge.title} — BurnBoard Challenge`;
     const description = (challenge.description || `Join the ${challenge.challenge_type || ''} challenge on BurnBoard`).slice(0, 200);
+    const ogImage = `${SITE}/api/og?template=platform&text=${encodeURIComponent(challenge.title.slice(0, 80))}&username=${encodeURIComponent('Challenge')}`;
 
     return {
       title,
@@ -54,8 +55,9 @@ export async function generateMetadata({ params }) {
         title,
         description,
         siteName: 'BURNBOARD',
+        images: [{ url: ogImage, width: 1200, height: 630, alt: title }],
       },
-      twitter: { card: 'summary', title, description },
+      twitter: { card: 'summary_large_image', title, description, images: [ogImage] },
     };
   } catch (err) {
     console.error('[Challenge Metadata] Error:', err);

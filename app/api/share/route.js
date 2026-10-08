@@ -24,14 +24,16 @@ function getSupabase() {
   return createClient(supabaseUrl, supabaseKey);
 }
 
-const RESOURCE_TYPES = ['social_post', 'roast', 'profile', 'community', 'challenge', 'battle', 'topic'];
+const RESOURCE_TYPES = ['social_post', 'photo', 'roast', 'profile', 'community', 'challenge', 'battle', 'topic', 'hashtag'];
 const CHANNELS = ['native', 'copy', 'clipboard', 'x', 'facebook', 'whatsapp', 'telegram', 'sms', 'email', 'link', 'other'];
 
 // Lightweight access validation — the same RLS rules that govern reading the
 // resource. A share of private/removed/restricted content is refused.
 async function resourceIsShareable(client, type, id) {
   try {
-    if (type === 'social_post') {
+    if (type === 'social_post' || type === 'photo') {
+      // Photos are public photo posts (same table, photo content) — RLS
+      // already requires visibility=public + moderation visible.
       const { data } = await client.from('social_posts').select('id').eq('id', id).maybeSingle();
       return !!data; // RLS already requires visibility=public + moderation visible
     }
@@ -54,6 +56,16 @@ async function resourceIsShareable(client, type, id) {
     if (type === 'topic') {
       const { data } = await client.from('topics').select('id').eq('id', id).maybeSingle();
       return !!data;
+    }
+    if (type === 'hashtag') {
+      // Hashtags are public aggregations — no private data. The id carries
+      // the normalized tag; it must be well-formed or the share is refused.
+      try {
+        const { normalizeTag } = await import('@/lib/hashtags');
+        return normalizeTag(String(id).replace(/^#+/, '')) !== null;
+      } catch {
+        return false;
+      }
     }
     if (type === 'battle') {
       const { data } = await client.from('battles').select('id').eq('id', id).maybeSingle();
@@ -117,10 +129,10 @@ export async function POST(req) {
     // strong positive signal (strength 2.0 per SIGNAL_STRENGTH). One signal
     // per user per item — repeat shares don't inflate affinity. Anonymous
     // shares stay in the ledger only; no behavioral profile is fabricated.
-    if (actorId && session?.client && (resourceType === 'social_post' || resourceType === 'roast')) {
+    if (actorId && session?.client && (resourceType === 'social_post' || resourceType === 'photo' || resourceType === 'roast')) {
       (async () => {
         try {
-          const meta = await resolveContentContext(session.client, resourceType, resourceId);
+          const meta = await resolveContentContext(session.client, resourceType === 'photo' ? 'social_post' : resourceType, resourceId);
           await recordSignal({
             client: session.client,
             userId: actorId,
@@ -130,6 +142,28 @@ export async function POST(req) {
             context: { ...(meta || {}), channel },
             idempotencyKey: `share-${resourceType}-${resourceId}`,
           });
+        } catch {}
+      })();
+    }
+
+    // First-share achievement: meaningful product recognition for a real
+    // share (0 XP — achievements, never payouts, so spam is not incentivized).
+    if (actorId) {
+      (async () => {
+        try {
+          const { checkAndUnlockAchievements } = await import('@/lib/reputation/badges');
+          const unlocked = await checkAndUnlockAchievements(actorId);
+          if ((unlocked || []).some((a) => a?.id === 'first_share')) {
+            const { recordGrowthEvent } = await import('@/lib/experimentService');
+            await recordGrowthEvent('first_share_completed', actorId, { channel });
+            try {
+              const { notifyAchievementUnlocked } = await import('@/lib/notifications');
+              await notifyAchievementUnlocked({
+                userId: actorId,
+                achievement: (unlocked || []).find((a) => a?.id === 'first_share'),
+              });
+            } catch {}
+          }
         } catch {}
       })();
     }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getRequestContext } from '@/lib/routeAuth';
+import { rateLimitMiddleware, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
 
 /**
  * POST /api/referral/claim (authenticated)
@@ -32,6 +33,12 @@ export async function POST(req) {
 
   if (!token || !/^[0-9a-f-]{36}$/i.test(token)) {
     return response; // No legitimate token → nothing to claim.
+  }
+
+  // Claim attempts are abuse-sensitive (farming): per-user hourly cap.
+  const claimLimit = rateLimitMiddleware(ipKey(userId, 'referral_claim'), RATE_LIMITS.REFERRAL_CLAIM);
+  if (claimLimit.blocked) {
+    return response;
   }
 
   try {

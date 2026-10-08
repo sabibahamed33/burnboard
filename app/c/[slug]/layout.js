@@ -45,6 +45,7 @@ export async function generateMetadata({ params }) {
 
     const title = `${community.name} — BurnBoard Community`;
     const description = (community.description || `Join ${community.name} on BurnBoard`).slice(0, 200);
+    const ogImage = `${SITE}/api/og?template=platform&text=${encodeURIComponent(community.name.slice(0, 80))}&username=${encodeURIComponent('Community')}`;
 
     return {
       title,
@@ -56,8 +57,9 @@ export async function generateMetadata({ params }) {
         title,
         description,
         siteName: 'BURNBOARD',
+        images: [{ url: ogImage, width: 1200, height: 630, alt: title }],
       },
-      twitter: { card: 'summary', title, description },
+      twitter: { card: 'summary_large_image', title, description, images: [ogImage] },
     };
   } catch (err) {
     console.error('[Community Metadata] Error:', err);

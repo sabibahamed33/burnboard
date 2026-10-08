@@ -10,6 +10,7 @@ import {
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { track } from '@/lib/analytics';
 import PhotoComposer from '@/components/create/PhotoComposer';
+import ShareButton from '@/components/growth/ShareButton';
 
 /**
  * /create — Universal Content Creation Entry Point
@@ -357,6 +358,11 @@ export default function CreatePage() {
     const createdVisibility = createdPost.visibility || 'public';
     const isDraftPost = createdVisibility === 'draft';
     const isScheduledPost = createdVisibility === 'scheduled';
+    // Optional one-time share: public posts only. Drafts/scheduled/private
+    // never get a share action. Shown once, never nagged.
+    const canShareCreated = !isDraftPost && !isScheduledPost
+      && createdVisibility === 'public' && createdPost.id
+      && createdPost.metadata?.permissions?.sharing !== 'off';
     return (
       <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
         <div className="max-w-lg mx-auto space-y-6 pt-8">
@@ -414,6 +420,21 @@ export default function CreatePage() {
               Create Another
             </button>
           </div>
+          {canShareCreated && (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4 text-center space-y-2">
+              <p className="text-xs text-zinc-400">Your post is live. Want to show it off?</p>
+              <ShareButton
+                resourceType="social_post"
+                resourceId={String(createdPost.id)}
+                url={typeof window !== 'undefined' ? `${window.location.origin}/post/${createdPost.id}` : `/post/${createdPost.id}`}
+                title="BurnBoard 🔥"
+                text="Check out my post on BurnBoard"
+                label="Share this post"
+                variant="solid"
+                className="w-full justify-center py-3 text-xs uppercase tracking-wider"
+              />
+            </div>
+          )}
         </div>
       </div>
     );
