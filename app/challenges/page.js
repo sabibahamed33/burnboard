@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Flame, Plus, ArrowUpRight, Swords, Users, BellRing, X } from 'lucide-react';
+import { Flame, Plus, Users, BellRing, X } from 'lucide-react';
 import { ChallengeCard } from '@/components/challenges';
 import { track } from '@/lib/analytics';
 
@@ -13,14 +13,14 @@ import { track } from '@/lib/analytics';
 
 function SectionHeader({ icon, title, href, actionLabel }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between px-0.5">
       <div className="flex items-center gap-2">
-        <span className="text-lg" aria-hidden="true">{icon}</span>
-        <h2 className="text-sm font-black text-white uppercase tracking-wider font-mono">{title}</h2>
+        <span className="text-base" aria-hidden="true">{icon}</span>
+        <h2 className="text-[15px] font-extrabold tracking-tight text-white">{title}</h2>
       </div>
       {href && (
-        <Link href={href} className="text-[11px] font-mono text-[#ff4d00] hover:text-white transition-colors flex items-center gap-1">
-          {actionLabel || 'View all'} <ArrowUpRight className="w-3 h-3" />
+        <Link href={href} className="flex min-h-[36px] items-center gap-0.5 text-xs font-semibold text-zinc-400 transition-colors hover:text-[#ff4d00]">
+          {actionLabel || 'See all'} <span aria-hidden="true">›</span>
         </Link>
       )}
     </div>
@@ -29,9 +29,9 @@ function SectionHeader({ icon, title, href, actionLabel }) {
 
 function SectionEmpty({ text, sub }) {
   return (
-    <div className="bg-[#111] border border-dashed border-[#333] rounded-2xl p-6 text-center">
+    <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center">
       <p className="text-xs text-zinc-500">{text}</p>
-      {sub && <p className="text-[11px] text-zinc-600 font-mono mt-1">{sub}</p>}
+      {sub && <p className="mt-1 font-mono text-[11px] text-zinc-600">{sub}</p>}
     </div>
   );
 }
@@ -50,6 +50,7 @@ export default function ChallengesHubPage() {
     mine: null,
     invites: null,
   });
+  const [tab, setTab] = useState('active');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -100,36 +101,71 @@ export default function ChallengesHubPage() {
   const showMine = mineList.length > 0 || (sections.mine && sections.mine.total > 0);
   const showInvites = inviteList.length > 0;
 
-  return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
-      <div className="max-w-4xl mx-auto space-y-8">
-        {/* Header */}
-        <header className="space-y-4 py-4 border-b border-[#222]">
-          <div className="flex items-center justify-between">
-            <Link href="/home" className="flex items-center gap-2 text-zinc-400 hover:text-white font-mono text-xs transition-colors">
-              <Flame className="w-4 h-4 text-[#ff4d00] fill-[#ff4d00]" />
-              <span>BURNBOARD</span>
-            </Link>
-            <Link
-              href="/challenges/new"
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#ff4d00] hover:bg-[#ff6622] text-black font-bold text-[11px] rounded-xl transition-all shadow-[0_0_15px_rgba(255,77,0,0.3)]"
-              aria-label="Create a new challenge"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              NEW CHALLENGE
-            </Link>
-          </div>
+  // Ending Soon: real active challenges with deadlines, soonest first.
+  // Challenges without ends_at stay in Active, never in this list.
+  const endingSoon = (sections.active?.challenges || [])
+    .filter((c) => c.ends_at && new Date(c.ends_at).getTime() > Date.now())
+    .sort((a, b) => new Date(a.ends_at) - new Date(b.ends_at))
+    .slice(0, 6);
 
-          <div className="text-center space-y-2">
-            <div className="flex items-center justify-center gap-2 text-[#ff4d00]">
-              <Swords className="w-6 h-6" aria-hidden="true" />
-              <h1 className="text-xl font-black uppercase tracking-wider font-mono">CHALLENGES</h1>
-            </div>
-            <p className="text-xs text-zinc-400 font-mono max-w-md mx-auto">
-              Do something, don&apos;t just scroll. Join a challenge, drop your take, and see who lands the hardest.
-            </p>
-          </div>
+  const TABS = [
+    { key: 'active', label: 'Active' },
+    { key: 'ending', label: 'Ending Soon' },
+    { key: 'new', label: 'New' },
+    ...(showMine ? [{ key: 'mine', label: 'Mine' }] : []),
+  ];
+  const showTab = (key) => tab === key;
+
+  return (
+    <div className="min-h-screen bg-[#0a0a0a] pb-28 font-sans text-white sm:pb-16">
+      <div className="mx-auto w-full max-w-4xl space-y-6 px-4 pt-4 sm:px-6">
+        {/* Brand header */}
+        <header className="flex min-h-[44px] items-center justify-between">
+          <Link href="/" className="flex items-center gap-1.5" aria-label="BurnBoard home">
+            <Flame className="h-5 w-5 fill-[#ff4d00] text-[#ff4d00]" />
+            <span className="text-[15px] font-black tracking-wide text-white">BURNBOARD</span>
+          </Link>
+          <Link
+            href="/challenges/new"
+            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-[#ff4d00] px-4 text-[11px] font-black uppercase tracking-wider text-black transition-all hover:bg-[#ff6622] active:scale-95"
+            aria-label="Create a new challenge"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New
+          </Link>
         </header>
+
+        {/* Hero */}
+        <div className="space-y-1">
+          <h1 className="flex items-center gap-2 text-[28px] font-black leading-none tracking-tight text-white">
+            <span aria-hidden="true">🔥</span> Challenges
+          </h1>
+          <p className="text-[13px] text-zinc-400">
+            Jump in. Make something. Get noticed.
+          </p>
+        </div>
+
+        {/* Tabs — each backed by a real scope */}
+        <nav className="flex gap-1 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03] p-1 no-scrollbar" role="tablist" aria-label="Challenges">
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTab(t.key)}
+                className={`min-h-[44px] flex-1 whitespace-nowrap rounded-xl px-4 text-xs font-bold transition-all active:scale-95 ${
+                  active
+                    ? 'bg-[#ff4d00] text-black shadow-[0_0_16px_rgba(255,77,0,0.35)]'
+                    : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
 
         {error && (
           <div className="bg-red-950/30 border border-red-500/30 rounded-2xl p-4 text-center text-sm text-red-400 font-mono">
@@ -150,34 +186,34 @@ export default function ChallengesHubPage() {
         )}
 
         {!loading && !error && (
-          <div className="space-y-10">
-            {/* Invitations for you */}
+          <div className="space-y-8">
+            {/* Invitations for you — pinned on every tab */}
             {showInvites && (
-              <section className="space-y-4" aria-label="Challenge invitations for you">
+              <section className="space-y-3" aria-label="Challenge invitations for you">
                 <SectionHeader icon="🔔" title="Invitations for you" />
                 <div className="space-y-3">
                   {inviteList.map(challenge => (
-                    <div key={challenge.id} className="bg-gradient-to-r from-[#1a1205] to-[#111] border border-[#ff4d00]/30 rounded-2xl p-4 flex items-center gap-4">
+                    <div key={challenge.id} className="flex items-center gap-3 rounded-[20px] border border-[#ff4d00]/25 bg-gradient-to-r from-[#1a1205] to-[#111] p-4">
                       <div className="flex-1 min-w-0">
-                        <p className="text-[10px] font-mono uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+                        <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
                           <BellRing className="w-3 h-3 text-[#ff4d00]" />
                           @{challenge.creator?.username || 'Someone'} invited you
                         </p>
-                        <Link href={`/challenges/${challenge.slug}`} className="block text-sm font-bold text-white hover:text-[#ff4d00] transition-colors mt-0.5 truncate">
+                        <Link href={`/challenges/${challenge.slug}`} className="mt-0.5 block truncate text-sm font-bold text-white hover:text-[#ff4d00] transition-colors">
                           {challenge.title}
                         </Link>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex shrink-0 items-center gap-2">
                         <button
                           onClick={() => handleDeclineInvite(challenge.slug)}
-                          className="px-3 py-2 rounded-xl border border-[#333] text-[11px] font-mono text-zinc-400 hover:text-white hover:border-red-500/50 transition-all flex items-center gap-1.5"
+                          className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-white/10 px-3 font-mono text-[11px] text-zinc-400 transition-all hover:border-red-500/50 hover:text-white"
                           aria-label={`Decline invitation to ${challenge.title}`}
                         >
                           <X className="w-3 h-3" /> Decline
                         </button>
                         <Link
                           href={`/challenges/${challenge.slug}`}
-                          className="px-3 py-2 rounded-xl bg-[#ff4d00] text-black text-[11px] font-mono font-bold hover:bg-[#ff6622] transition-all"
+                          className="flex min-h-[44px] items-center rounded-xl bg-[#ff4d00] px-4 font-mono text-[11px] font-bold text-black transition-all hover:bg-[#ff6622] active:scale-95"
                         >
                           View
                         </Link>
@@ -188,11 +224,75 @@ export default function ChallengesHubPage() {
               </section>
             )}
 
-            {/* Your challenges */}
-            {showMine && (
-              <section className="space-y-4" aria-label="Your challenges">
+            {/* Active */}
+            {showTab('active') && (
+              <section className="space-y-3" aria-label="Active challenges">
+                <SectionHeader icon="⚡" title="Active" href="/challenges?view=active" />
+                {sections.active?.challenges?.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {sections.active.challenges.map(challenge => (
+                      <ChallengeCard key={challenge.id} challenge={challenge} />
+                    ))}
+                  </div>
+                ) : (
+                  <SectionEmpty text="No active challenges right now." sub="Be the first to start one." />
+                )}
+              </section>
+            )}
+
+            {/* Ending soon — real deadlines only, soonest first */}
+            {showTab('ending') && (
+              <section className="space-y-3" aria-label="Ending soon challenges">
+                <SectionHeader icon="⏳" title="Ending soon" />
+                {endingSoon.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {endingSoon.map(challenge => (
+                      <ChallengeCard key={challenge.id} challenge={challenge} />
+                    ))}
+                  </div>
+                ) : (
+                  <SectionEmpty text="Nothing ending soon." sub="Active challenges without deadlines stay under Active." />
+                )}
+              </section>
+            )}
+
+            {/* Trending */}
+            {showTab('active') && (
+              <section className="space-y-3" aria-label="Trending challenges">
+                <SectionHeader icon="📈" title="Trending now" />
+                {sections.trending?.challenges?.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {sections.trending.challenges.slice(0, 4).map(challenge => (
+                      <ChallengeCard key={challenge.id} challenge={challenge} />
+                    ))}
+                  </div>
+                ) : (
+                  <SectionEmpty text="Nothing trending yet." sub="Real momentum starts with the first entry." />
+                )}
+              </section>
+            )}
+
+            {/* New */}
+            {showTab('new') && (
+              <section className="space-y-3" aria-label="New challenges">
+                <SectionHeader icon="🆕" title="New" />
+                {sections.newest?.challenges?.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {sections.newest.challenges.map(challenge => (
+                      <ChallengeCard key={challenge.id} challenge={challenge} />
+                    ))}
+                  </div>
+                ) : (
+                  <SectionEmpty text="No challenges yet." sub="Create the first one and invite someone." />
+                )}
+              </section>
+            )}
+
+            {/* Mine */}
+            {showTab('mine') && showMine && (
+              <section className="space-y-3" aria-label="Your challenges">
                 <SectionHeader icon="⚡" title="Your challenges" href="/challenges?view=mine" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {mineList.map(challenge => (
                     <ChallengeCard key={challenge.id} challenge={challenge} />
                   ))}
@@ -200,57 +300,15 @@ export default function ChallengesHubPage() {
               </section>
             )}
 
-            {/* Ending soon (real active challenges, soonest first) */}
-            <section className="space-y-4" aria-label="Ending soon challenges">
-              <SectionHeader icon="⏳" title="Ending soon" href="/challenges?view=active" />
-              {sections.active?.challenges?.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {sections.active.challenges.map(challenge => (
-                    <ChallengeCard key={challenge.id} challenge={challenge} />
-                  ))}
-                </div>
-              ) : (
-                <SectionEmpty text="No active challenges right now." sub="Be the first to start one." />
-              )}
-            </section>
-
-            {/* Trending (real participation velocity + freshness) */}
-            <section className="space-y-4" aria-label="Trending challenges">
-              <SectionHeader icon="📈" title="Trending now" />
-              {sections.trending?.challenges?.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {sections.trending.challenges.map(challenge => (
-                    <ChallengeCard key={challenge.id} challenge={challenge} />
-                  ))}
-                </div>
-              ) : (
-                <SectionEmpty text="Nothing trending yet." sub="Real momentum starts with the first entry." />
-              )}
-            </section>
-
-            {/* Newest */}
-            <section className="space-y-4" aria-label="New challenges">
-              <SectionHeader icon="🆕" title="New challenges" />
-              {sections.newest?.challenges?.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {sections.newest.challenges.map(challenge => (
-                    <ChallengeCard key={challenge.id} challenge={challenge} />
-                  ))}
-                </div>
-              ) : (
-                <SectionEmpty text="No challenges yet." sub="Create the first one and invite someone." />
-              )}
-            </section>
-
             {/* Create CTA */}
-            <div className="text-center pt-4 pb-8 border-t border-[#222] space-y-4">
-              <p className="text-xs text-zinc-500 font-mono uppercase tracking-wider flex items-center justify-center gap-2">
+            <div className="space-y-4 border-t border-white/10 pt-6 text-center">
+              <p className="flex items-center justify-center gap-2 font-mono text-xs uppercase tracking-wider text-zinc-500">
                 <Users className="w-3.5 h-3.5" aria-hidden="true" />
                 Participation creates involvement. Start something.
               </p>
               <Link
                 href="/challenges/new"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#ff4d00] hover:bg-[#ff6622] text-black font-black text-sm rounded-xl transition-all shadow-[0_0_25px_rgba(255,77,0,0.3)] uppercase tracking-wider"
+                className="inline-flex min-h-[48px] items-center gap-2 rounded-2xl bg-[#ff4d00] px-6 text-sm font-black uppercase tracking-wider text-black transition-all hover:bg-[#ff6622] active:scale-95"
               >
                 <Plus className="w-4 h-4" />
                 Create a challenge

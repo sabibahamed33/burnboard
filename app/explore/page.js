@@ -808,7 +808,7 @@ export default function ExplorePage() {
               {/* Active Battles */}
               {showSection('battles') && (
                 <section className="space-y-3" aria-label="Active Battles">
-                  <SectionHeader emoji="⚔" title="Active Battles" href="/battle" hrefLabel="See all" />
+                  <SectionHeader emoji="⚔" title="Active Battles" href="/battles" hrefLabel="See all" />
                   {battles.length > 0 ? (
                     <Carousel label="Active Battles">
                       {battles.slice(0, 6).map((b) => (
