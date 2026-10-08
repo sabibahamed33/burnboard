@@ -55,7 +55,7 @@ function freshnessDecay(createdAt, halfLifeHours = 48) {
   return Math.pow(0.5, ageHours / halfLifeHours);
 }
 
-async function searchPeople(db, q, userId, limit) {
+async function searchPeople(db, q, userId, limit, offset = 0) {
   const safe = sanitizeLike(q);
   if (!safe) return [];
   // Suspended/banned users are never discoverable. The is_banned filter is
@@ -108,7 +108,7 @@ async function searchPeople(db, q, userId, limit) {
       return { ...p, _score: score };
     })
     .sort((a, b) => b._score - a._score || (b.follower_count || 0) - (a.follower_count || 0))
-    .slice(0, limit)
+    .slice(offset, offset + limit)
     .map(({ _score, ...rest }) => rest);
 }
 
@@ -132,7 +132,7 @@ async function communityAccessMap(db, userId, communityIds) {
   return map;
 }
 
-async function searchRoasts(db, q, userId, limit, { photoOnly = false } = {}) {
+async function searchRoasts(db, q, userId, limit, { photoOnly = false, offset = 0 } = {}) {
   const safe = sanitizeLike(q);
   if (!safe) return [];
   const like = `%${safe}%`;
@@ -217,11 +217,11 @@ async function searchRoasts(db, q, userId, limit, { photoOnly = false } = {}) {
   }
   return items
     .sort((a, b) => b._score - a._score)
-    .slice(0, limit)
+    .slice(offset, offset + limit)
     .map(({ _score, ...rest }) => rest);
 }
 
-async function searchChallenges(db, q, limit) {
+async function searchChallenges(db, q, limit, offset = 0) {
   const safe = sanitizeLike(q);
   if (!safe) return [];
   const like = `%${safe}%`;
@@ -247,7 +247,7 @@ async function searchChallenges(db, q, limit) {
       return { ...c, _score: score * (1 + freshnessDecay(c.created_at, 72)) };
     })
     .sort((a, b) => b._score - a._score)
-    .slice(0, limit)
+    .slice(offset, offset + limit)
     .map(({ _score, ...rest }) => rest);
 }
 
@@ -256,7 +256,7 @@ async function searchChallenges(db, q, limit) {
  * they are participant matchups). Matches participant usernames, prioritizes
  * live battles, then vote velocity, then recency. Never alters results.
  */
-async function searchBattles(db, q, userId, limit, status = 'all') {
+async function searchBattles(db, q, userId, limit, status = 'all', offset = 0) {
   const safe = sanitizeLike(q);
   if (!safe) return [];
   const like = `%${safe}%`;
@@ -312,7 +312,7 @@ async function searchBattles(db, q, userId, limit, status = 'all') {
       };
     })
     .sort((a, b) => b._score - a._score)
-    .slice(0, limit)
+    .slice(offset, offset + limit)
     .map(({ _score, ...rest }) => rest);
 }
 
@@ -468,6 +468,9 @@ async function getHandler(req) {
     const rawQ = searchParams.get('q') || '';
     const scope = (searchParams.get('scope') || 'all').toLowerCase();
     const limit = Math.min(parseInt(searchParams.get('limit') || '12', 10) || 12, MAX_LIMIT);
+    // Bounded depth: ranked scopes scan a top-N window, so deep offsets
+    // return []. This also resists enumeration/scraping via paging.
+    const offset = Math.min(Math.max(parseInt(searchParams.get('offset') || '0', 10) || 0, 0), 60);
     const battleStatus = (searchParams.get('battle_status') || 'all').toLowerCase();
 
     if (!SCOPES.includes(scope)) {
@@ -493,12 +496,12 @@ async function getHandler(req) {
     const semanticTopics = understandQuery(q);
 
     const [people, roasts, photos, communitiesRes, challenges, battles, topics, hashtags] = await Promise.all([
-      want('people') ? searchPeople(db, q, userId, limit) : Promise.resolve([]),
-      want('roasts') || want('hashtags') ? searchRoasts(db, q, userId, limit) : Promise.resolve([]),
-      want('photos') ? searchRoasts(db, q, userId, limit, { photoOnly: true }) : Promise.resolve([]),
-      want('communities') ? searchCommunities({ q, sort: 'newest', limit, offset: 0, userId }) : Promise.resolve([]),
-      want('challenges') ? searchChallenges(db, q, limit) : Promise.resolve([]),
-      want('battles') ? searchBattles(db, q, userId, limit, battleStatus) : Promise.resolve([]),
+      want('people') ? searchPeople(db, q, userId, limit, offset) : Promise.resolve([]),
+      want('roasts') || want('hashtags') ? searchRoasts(db, q, userId, limit, { offset }) : Promise.resolve([]),
+      want('photos') ? searchRoasts(db, q, userId, limit, { photoOnly: true, offset }) : Promise.resolve([]),
+      want('communities') ? searchCommunities({ q, sort: 'newest', limit, offset: scope === 'all' ? 0 : offset, userId }) : Promise.resolve([]),
+      want('challenges') ? searchChallenges(db, q, limit, offset) : Promise.resolve([]),
+      want('battles') ? searchBattles(db, q, userId, limit, battleStatus, offset) : Promise.resolve([]),
       want('topics') || scope === 'all' ? searchTopics(db, q, scope === 'all' ? 6 : limit) : Promise.resolve([]),
       want('hashtags') ? searchHashtags(db, q, limit) : Promise.resolve({ tags: [], posts: [] }),
     ]);
@@ -539,6 +542,7 @@ async function getHandler(req) {
       success: true,
       query: q,
       scope,
+      offset,
       people,
       roasts,
       photos,
@@ -551,6 +555,15 @@ async function getHandler(req) {
       related,
       didYouMean,
       semantic: { topics: semanticTopics, synonyms: intentSynonyms(q) },
+      // True when the active scoped list filled the page (more may exist
+      // within the bounded ranking window). All-tab clients ignore it.
+      hasMore:
+        people.length >= limit ||
+        roasts.length >= limit ||
+        photos.length >= limit ||
+        communities.length >= limit ||
+        challenges.length >= limit ||
+        battles.length >= limit,
     });
   } catch (err) {
     console.error('[Search] Error:', err);
