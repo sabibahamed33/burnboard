@@ -12,17 +12,21 @@ import { CommunityCard } from '@/components/communities';
 /**
  * /search — BurnBoard discovery search.
  *
- * Server-backed across people, roasts, hashtags, communities, challenges,
- * and topics (GET /api/search). Debounced input, stale-response guard,
- * per-account local search history, friendly error/empty states.
+ * Server-backed across people, roasts, photos, hashtags, communities,
+ * battles, challenges, and topics (GET /api/search). Debounced input,
+ * request cancellation, stale-response guard, per-account local search
+ * history, trending searches, did-you-mean, related searches,
+ * friendly error/empty states.
  */
 
 const TABS = [
-  { key: 'all', label: 'All', scope: 'all' },
+  { key: 'all', label: 'Top', scope: 'all' },
   { key: 'people', label: 'People', scope: 'people' },
   { key: 'roasts', label: 'Roasts', scope: 'roasts' },
+  { key: 'photos', label: 'Photos', scope: 'photos' },
   { key: 'hashtags', label: 'Hashtags', scope: 'hashtags' },
   { key: 'communities', label: 'Communities', scope: 'communities' },
+  { key: 'battles', label: 'Battles', scope: 'battles' },
   { key: 'challenges', label: 'Challenges', scope: 'challenges' },
   { key: 'topics', label: 'Topics', scope: 'topics' },
 ];
@@ -59,6 +63,18 @@ function timeAgo(dateString) {
 
 function roastHref(item) {
   return item.kind === 'roast' ? `/r/${item.id}` : `/post/${item.id}`;
+}
+
+/** Fire-and-forget result-open tracking (discovery loop signal, no PII). */
+function trackResultOpen(kind, id) {
+  if (!kind || !id) return;
+  try {
+    fetch('/api/growth/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventType: 'search_result_opened', subjectId: String(id).slice(0, 120), metadata: { kind } }),
+    }).catch(() => {});
+  } catch {}
 }
 
 export default function SearchPage() {
@@ -161,6 +177,20 @@ export default function SearchPage() {
     runSearch(trimmed, activeTab.scope);
   }, [trimmed, activeTab.scope, runSearch]);
 
+  // Trending searches for the entry state (real trends only, empty when quiet).
+  useEffect(() => {
+    if (hasQuery) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/search/trending?window=today');
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok) setTrends(data.trends || []);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [hasQuery]);
+
   const saveHistory = useCallback((term) => {
     const clean = term.trim();
     if (!clean) return;
@@ -193,21 +223,30 @@ export default function SearchPage() {
   const hasQuery = trimmed.length > 0;
   const people = results?.people || [];
   const roasts = results?.roasts || [];
+  const photos = results?.photos || [];
   const hashtagTags = results?.hashtags?.tags || [];
   const hashtagPosts = results?.hashtags?.posts || [];
   const communities = results?.communities || [];
   const challenges = results?.challenges || [];
+  const battles = results?.battles || [];
   const topics = results?.topics || [];
   const suggestions = results?.suggestions || [];
+  const related = results?.related || [];
+  const didYouMean = results?.didYouMean || null;
+  const [trends, setTrends] = useState([]);
   const showPeople = tab === 'all' || tab === 'people';
   const showRoasts = tab === 'all' || tab === 'roasts' || tab === 'hashtags';
+  const showPhotos = tab === 'all' || tab === 'photos';
+  const showBattles = tab === 'all' || tab === 'battles';
   const roastList = tab === 'hashtags' ? hashtagPosts : roasts;
+  const photoList = tab === 'photos' ? photos : (tab === 'all' ? photos : []);
   const isEmpty =
     hasQuery && !loading && !error && results &&
-    people.length === 0 && roastList.length === 0 &&
+    people.length === 0 && roastList.length === 0 && photoList.length === 0 &&
     (tab !== 'hashtags' || hashtagTags.length === 0) &&
     (tab === 'all' || tab === 'communities' ? communities.length === 0 : true) &&
     (tab === 'all' || tab === 'challenges' ? challenges.length === 0 : true) &&
+    (tab === 'all' || tab === 'battles' ? battles.length === 0 : true) &&
     (tab === 'all' || tab === 'topics' ? topics.length === 0 : true);
 
   return (
@@ -238,7 +277,7 @@ export default function SearchPage() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search people, roasts, #hashtags, challenges, topics..."
+            placeholder="Search people, roasts, photos, #hashtags, battles, challenges, topics..."
             autoFocus
             aria-label="Search BurnBoard"
             className="w-full bg-[#111] border border-[#222] rounded-xl pl-11 pr-10 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#ff4d00] transition-colors min-h-[48px]"
@@ -311,6 +350,28 @@ export default function SearchPage() {
         {/* Results */}
         {!loading && !error && hasQuery && results && !isEmpty && (
           <div className="space-y-5">
+            {didYouMean && (
+              <button
+                onClick={() => setQuery(didYouMean)}
+                className="w-full text-left bg-[#111] border border-dashed border-[#333] hover:border-[#ff4d00]/50 rounded-xl p-3 text-xs font-mono text-zinc-300 transition-all min-h-[44px]"
+              >
+                Did you mean <span className="text-[#ff4d00] font-bold">{didYouMean}</span>?
+              </button>
+            )}
+            {related.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar" aria-label="Related searches">
+                <span className="shrink-0 text-[11px] font-mono text-zinc-600 uppercase tracking-wider py-2">Related:</span>
+                {related.map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setQuery(r)}
+                    className="shrink-0 px-3 py-2 rounded-xl bg-[#111] border border-[#222] text-xs font-mono text-zinc-300 hover:text-white hover:border-[#333] transition-all min-h-[40px]"
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            )}
             {showPeople && people.length > 0 && (
               <section className="space-y-3" aria-label="People">
                 <p className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
@@ -318,7 +379,7 @@ export default function SearchPage() {
                 </p>
                 {people.map((person) => (
                   <div key={person.id} className="bg-[#111] border border-[#222] hover:border-[#ff4d00]/40 rounded-xl p-3 transition-all flex items-center gap-3">
-                    <Link href={person.username ? `/u/${person.username}` : '#'} className="flex items-center gap-3 min-w-0 flex-1">
+                    <Link href={person.username ? `/u/${person.username}` : '#'} onClick={() => trackResultOpen('user', person.id)} className="flex items-center gap-3 min-w-0 flex-1">
                       <Avatar username={person.username} size="md" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-bold text-white truncate">
@@ -341,7 +402,7 @@ export default function SearchPage() {
                   Roasts ({roastList.length})
                 </p>
                 {roastList.map((item) => (
-                  <Link key={`${item.kind}-${item.id}`} href={roastHref(item)}>
+                  <Link key={`${item.kind}-${item.id}`} href={roastHref(item)} onClick={() => trackResultOpen(item.kind, item.id)}>
                     <div className="bg-[#111] border border-[#222] hover:border-[#ff4d00]/40 rounded-xl p-4 transition-all cursor-pointer group">
                       <p className="text-sm text-zinc-100 leading-relaxed line-clamp-3 group-hover:text-white">
                         {item.text}
@@ -355,6 +416,58 @@ export default function SearchPage() {
                         {item.commentCount > 0 && <span>💬 {item.commentCount}</span>}
                       </div>
                     </div>
+                  </Link>
+                ))}
+              </section>
+            )}
+
+            {showPhotos && photoList.length > 0 && (
+              <section className="space-y-3" aria-label="Photos">
+                <p className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
+                  Photos ({photoList.length})
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {photoList.slice(0, 6).map((item) => (
+                    <Link
+                      key={`photo-${item.id}`}
+                      href={roastHref(item)}
+                      onClick={() => trackResultOpen('social_post', item.id)}
+                      className="block bg-[#111] border border-[#222] hover:border-[#ff4d00]/40 rounded-xl p-3 transition-all"
+                    >
+                      <p className="text-xs text-zinc-200 leading-relaxed line-clamp-3">
+                        {item.text}
+                      </p>
+                      <p className="mt-1.5 text-[10px] font-mono text-zinc-500">
+                        {item.author?.username ? `@${item.author.username} · ` : ''}{timeAgo(item.createdAt)}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {showBattles && battles.length > 0 && (
+              <section className="space-y-3" aria-label="Battles">
+                <p className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
+                  Battles ({battles.length})
+                </p>
+                {battles.map((b) => (
+                  <Link
+                    key={b.id}
+                    href="/battle"
+                    onClick={() => trackResultOpen('battle', b.id)}
+                    className="block bg-[#111] border border-[#222] hover:border-[#ff4d00]/40 rounded-xl p-4 transition-all group"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-[10px] font-mono font-bold uppercase tracking-wider ${b.status === 'live' ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                        {b.status === 'live' ? '⚡ Live' : '🏁 Finished'}
+                      </span>
+                      {b.votes > 0 && <span className="text-[10px] font-mono text-zinc-600">▲ {b.votes} votes</span>}
+                    </div>
+                    <p className="text-sm font-bold text-white group-hover:text-[#ff4d00] transition-colors">
+                      {(b.participants || []).map((p) => `@${p.username}`).join('  vs  ') || 'Battle'}
+                    </p>
+                    <p className="text-[11px] font-mono text-zinc-500 mt-1">{timeAgo(b.createdAt)}</p>
                   </Link>
                 ))}
               </section>
@@ -407,6 +520,7 @@ export default function SearchPage() {
                     <Link
                       key={c.id}
                       href={`/challenges/${c.slug}`}
+                      onClick={() => trackResultOpen('challenge', c.id)}
                       className="block bg-[#111] border border-[#222] hover:border-[#ff4d00]/40 rounded-xl p-4 transition-all group"
                     >
                       <div className="flex items-center gap-2 mb-1">
@@ -523,11 +637,30 @@ export default function SearchPage() {
                 </div>
               </section>
             )}
+            {trends.length > 0 && (
+              <section className="space-y-3" aria-label="Trending searches">
+                <p className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider text-left">
+                  Trending now
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {trends.slice(0, 8).map((t) => (
+                    <button
+                      key={t.query}
+                      onClick={() => setQuery(t.query)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#111] border border-[#222] text-xs font-mono text-zinc-200 hover:border-[#ff4d00]/50 hover:text-white transition-all min-h-[40px]"
+                    >
+                      <span className="text-[#ff4d00]">▲</span>
+                      {t.query}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
             <div className="text-center py-8 space-y-3">
               <div className="text-4xl">🔍</div>
               <p className="text-sm font-bold text-zinc-400">Search BurnBoard</p>
               <p className="text-xs text-zinc-500 max-w-sm mx-auto">
-                Find people, roasts, #hashtags, communities, challenges, and topics
+                Find people, roasts, photos, #hashtags, communities, battles, challenges, and topics
               </p>
             </div>
           </div>

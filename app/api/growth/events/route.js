@@ -46,6 +46,10 @@ const VALID_EVENT_TYPES = [
   'referral_conversion',
   'referral_activated',
   'invite_created',
+
+  // Search discovery (privacy-aware: scope + counts only, never raw PII)
+  'search_performed',
+  'search_result_opened',
   
   // Retention
   'notification_opened',

@@ -3,9 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 import { getRequestContext } from '@/lib/routeAuth';
 import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
 import { hiddenAuthorIds } from '@/lib/safety';
-import { sanitizeSearchQuery } from '@/lib/unicode';
 import { searchCommunities } from '@/lib/communities';
 import { normalizeQuery, normalizeTag, aggregateTags, extractTags } from '@/lib/hashtags';
+import { sanitizeSearchQuery } from '@/lib/unicode';
+import { understandQuery, intentSynonyms } from '@/lib/semantic';
 import { instrumentHandler } from '@/lib/metrics';
 
 /**
@@ -31,18 +32,20 @@ function getSupabase() {
   return createClient(supabaseUrl, supabaseKey);
 }
 
-const SCOPES = ['all', 'people', 'roasts', 'communities', 'challenges', 'topics', 'hashtags'];
+const SCOPES = ['all', 'people', 'roasts', 'photos', 'communities', 'challenges', 'battles', 'topics', 'hashtags'];
 const MAX_LIMIT = 20;
+const BATTLE_STATUSES = ['all', 'live', 'finished'];
 
 /**
  * Strip characters that break PostgREST `or()` filter syntax or act as
  * LIKE wildcards. Unicode-safe: NFC-normalizes and drops bidi/invisible
- * controls first so multilingual queries can't crash or spoof search.
- * The surrounding %...% for contains-match is added by each caller, so
- * user-supplied wildcards are never honored.
+ * controls first so multilingual queries (Bangla, Arabic, CJK, Latin)
+ * can't crash or spoof search. The surrounding %...% for contains-match
+ * is added by each caller, so user-supplied wildcards are never honored.
+ * Original query text is preserved by callers for display.
  */
 function sanitizeLike(q) {
-  return sanitizeSearchQuery(q).replace(/[,()"%_\\]/g, '').trim();
+  return sanitizeSearchQuery(q, 80).replace(/[,()"%_\\]/g, '').trim();
 }
 
 function freshnessDecay(createdAt, halfLifeHours = 48) {
@@ -55,25 +58,53 @@ function freshnessDecay(createdAt, halfLifeHours = 48) {
 async function searchPeople(db, q, userId, limit) {
   const safe = sanitizeLike(q);
   if (!safe) return [];
-  const { data } = await db
+  // Suspended/banned users are never discoverable. The is_banned filter is
+  // applied fail-soft (column may not exist on older snapshots).
+  let query = db
     .from('user_profiles')
     .select('id, username, display_name, bio, avatar_url, follower_count')
     .or(`username.ilike.%${safe}%,display_name.ilike.%${safe}%`)
+    .eq('is_banned', false)
     .limit(30);
+  let res = await query;
+  if (res.error && /is_banned|column/i.test(res.error.message || '')) {
+    res = await db
+      .from('user_profiles')
+      .select('id, username, display_name, bio, avatar_url, follower_count')
+      .or(`username.ilike.%${safe}%,display_name.ilike.%${safe}%`)
+      .limit(30);
+  }
+  const { data } = res;
   let rows = (data || []).filter((p) => p.username);
   if (userId && rows.length) {
     const hidden = await hiddenAuthorIds(db, userId, rows.map((r) => r.id));
     if (hidden.size) rows = rows.filter((r) => !hidden.has(r.id));
   }
+  // Relationship signal (RELEVANCE FIRST, personalization second): followed
+  // users get a modest boost that can never outrank an exact text match.
+  let followed = new Set();
+  if (userId && rows.length) {
+    try {
+      const { data: fr } = await db
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', userId)
+        .in('following_id', rows.map((r) => r.id).slice(0, 50));
+      followed = new Set((fr || []).map((f) => f.following_id));
+    } catch {}
+  }
   const lower = q.toLowerCase();
   return rows
     .map((p) => {
       const uname = (p.username || '').toLowerCase();
+      const dname = (p.display_name || '').toLowerCase();
       let score = 0;
       if (uname === lower) score = 4;
       else if (uname.startsWith(lower)) score = 3;
       else if (uname.includes(lower)) score = 2;
+      else if (dname === lower) score = 2.5;
       else score = 1;
+      if (followed.has(p.id)) score += 0.5;
       return { ...p, _score: score };
     })
     .sort((a, b) => b._score - a._score || (b.follower_count || 0) - (a.follower_count || 0))
@@ -101,26 +132,32 @@ async function communityAccessMap(db, userId, communityIds) {
   return map;
 }
 
-async function searchRoasts(db, q, userId, limit) {
+async function searchRoasts(db, q, userId, limit, { photoOnly = false } = {}) {
   const safe = sanitizeLike(q);
   if (!safe) return [];
   const like = `%${safe}%`;
+  const postSelect = 'id, content_text, user_id, community_id, content_type, upvote_count, comment_count, created_at, user_profiles!inner(id, username, display_name)';
+  let postQuery = db
+    .from('social_posts')
+    .select(postSelect)
+    .ilike('content_text', like)
+    .eq('moderation_state', 'visible')
+    .eq('visibility', 'public')
+    .order('created_at', { ascending: false })
+    .limit(30);
+  if (photoOnly) postQuery = postQuery.eq('content_type', 'photo');
   const [postsRes, roastsRes] = await Promise.all([
-    db
-      .from('social_posts')
-      .select('id, content_text, user_id, community_id, content_type, upvote_count, comment_count, created_at, user_profiles!inner(id, username, display_name)')
-      .ilike('content_text', like)
-      .eq('moderation_state', 'visible')
-      .eq('visibility', 'public')
-      .order('created_at', { ascending: false })
-      .limit(30),
-    db
-      .from('roasts')
-      .select('id, roast_text, user_id, upvotes, created_at')
-      .ilike('roast_text', like)
-      .eq('is_hidden', false)
-      .order('created_at', { ascending: false })
-      .limit(30),
+    postQuery,
+    // Photos scope shows photo posts only — skip the legacy roast table.
+    photoOnly
+      ? Promise.resolve({ data: [] })
+      : db
+        .from('roasts')
+        .select('id, roast_text, user_id, upvotes, created_at')
+        .ilike('roast_text', like)
+        .eq('is_hidden', false)
+        .order('created_at', { ascending: false })
+        .limit(30),
   ]);
   const posts = postsRes.data || [];
   const roastRows = roastsRes.data || [];
@@ -214,6 +251,125 @@ async function searchChallenges(db, q, limit) {
     .map(({ _score, ...rest }) => rest);
 }
 
+/**
+ * Battle search (honest to the schema: battles carry no title/topic text —
+ * they are participant matchups). Matches participant usernames, prioritizes
+ * live battles, then vote velocity, then recency. Never alters results.
+ */
+async function searchBattles(db, q, userId, limit, status = 'all') {
+  const safe = sanitizeLike(q);
+  if (!safe) return [];
+  const like = `%${safe}%`;
+  // Participant profiles matching the query (legacy profiles table).
+  let profileIds = [];
+  try {
+    const { data: profs } = await db
+      .from('profiles')
+      .select('id, username')
+      .ilike('username', like)
+      .limit(20);
+    profileIds = (profs || []).map((p) => p.id).filter(Boolean);
+  } catch {}
+  if (!profileIds.length) return [];
+
+  let query = db
+    .from('battles')
+    .select('id, profile1_id, profile2_id, votes1, votes2, is_active, created_at')
+    .or(`profile1_id.in.(${profileIds.join(',')}),profile2_id.in.(${profileIds.join(',')})`)
+    .order('created_at', { ascending: false })
+    .limit(30);
+  if (status === 'live') query = query.eq('is_active', true);
+  if (status === 'finished') query = query.eq('is_active', false);
+  const { data } = await query;
+  const rows = data || [];
+  if (!rows.length) return [];
+
+  // Resolve participant display info in one bounded query.
+  const allIds = [...new Set(rows.flatMap((b) => [b.profile1_id, b.profile2_id]).filter(Boolean))];
+  let byId = new Map();
+  try {
+    const { data: profs } = await db
+      .from('profiles')
+      .select('id, username, avatar_letter, avatar_color')
+      .in('id', allIds.slice(0, 60));
+    byId = new Map((profs || []).map((p) => [p.id, p]));
+  } catch {}
+
+  return rows
+    .map((b) => {
+      const votes = (b.votes1 || 0) + (b.votes2 || 0);
+      const p1 = byId.get(b.profile1_id) || null;
+      const p2 = byId.get(b.profile2_id) || null;
+      // Live first, then vote velocity proxy (votes), then freshness.
+      const score = (b.is_active ? 1000 : 0) + Math.log1p(votes) * 10 + freshnessDecay(b.created_at, 72) * 5;
+      return {
+        id: b.id,
+        status: b.is_active ? 'live' : 'finished',
+        participants: [p1, p2].filter(Boolean).map((p) => ({ id: p.id, username: p.username })),
+        votes: votes,
+        createdAt: b.created_at,
+        _score: score,
+      };
+    })
+    .sort((a, b) => b._score - a._score)
+    .slice(0, limit)
+    .map(({ _score, ...rest }) => rest);
+}
+
+/** Levenshtein distance (bounded inputs only — typo tolerance). */
+function editDistance(a, b, max = 2) {
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > max) return max + 1;
+  let prev = Array.from({ length: lb + 1 }, (_, i) => i);
+  for (let i = 1; i <= la; i += 1) {
+    let cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= lb; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > max) return max + 1;
+    prev = cur;
+  }
+  return prev[lb];
+}
+
+/**
+ * "Did you mean" — only when direct results are empty. Candidates come
+ * from REAL taxonomy (topic names, matched community names, matched tags).
+ * Low confidence → suggestion chip, never silent autocorrect.
+ */
+function didYouMean(query, { topics = [], communities = [], tags = [] }) {
+  const q = String(query || '').toLowerCase().replace(/^#+/, '').trim();
+  if (!q || q.length < 4 || q.length > 30 || q.includes(' ')) return null;
+  const candidates = new Set();
+  for (const t of topics.slice(0, 30)) {
+    const n = String(t.name || '').toLowerCase();
+    if (n && !n.includes(' ')) candidates.add(n);
+  }
+  for (const c of communities.slice(0, 20)) {
+    const n = String(c.name || '').toLowerCase();
+    if (n && !n.includes(' ')) candidates.add(n);
+  }
+  for (const t of tags.slice(0, 20)) {
+    const n = String(t.tag || '').toLowerCase();
+    if (n) candidates.add(n);
+  }
+  let best = null;
+  let bestDist = 3;
+  for (const c of candidates) {
+    if (c === q) return null; // exact exists — no suggestion needed
+    const d = editDistance(q, c, 2);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return bestDist <= 2 ? best : null;
+}
+
 async function searchTopics(db, q, limit) {
   let query = db.from('topics').select('id, name, slug');
   const safe = sanitizeLike(q);
@@ -280,6 +436,22 @@ async function suggestTopics(db, q) {
   return data || [];
 }
 
+/**
+ * Fire-and-forget trending log via the PII-guarded definer RPC.
+ * Never blocks or fails the search response.
+ */
+function supabaseLogSearch(anonClient, query, scope, userId) {
+  if (!anonClient) return;
+  anonClient.rpc('log_search_query', {
+    p_query: String(query || '').slice(0, 80),
+    p_scope: scope || 'all',
+    p_user: userId || null,
+  }).then(
+    () => {},
+    () => {}
+  );
+}
+
 async function getHandler(req) {
   try {
     const anon = getSupabase();
@@ -296,14 +468,18 @@ async function getHandler(req) {
     const rawQ = searchParams.get('q') || '';
     const scope = (searchParams.get('scope') || 'all').toLowerCase();
     const limit = Math.min(parseInt(searchParams.get('limit') || '12', 10) || 12, MAX_LIMIT);
+    const battleStatus = (searchParams.get('battle_status') || 'all').toLowerCase();
 
     if (!SCOPES.includes(scope)) {
       return NextResponse.json({ error: 'Invalid scope' }, { status: 400 });
     }
+    if (!BATTLE_STATUSES.includes(battleStatus)) {
+      return NextResponse.json({ error: 'Invalid battle_status' }, { status: 400 });
+    }
 
     const q = normalizeQuery(rawQ);
     if (!q && !(scope === 'topics' && !rawQ)) {
-      return NextResponse.json({ success: true, query: '', scope, people: [], roasts: [], communities: [], challenges: [], topics: [], hashtags: { tags: [], posts: [] }, suggestions: [] });
+      return NextResponse.json({ success: true, query: '', scope, people: [], roasts: [], photos: [], communities: [], challenges: [], battles: [], topics: [], hashtags: { tags: [], posts: [] }, suggestions: [], related: [], didYouMean: null, semantic: { topics: [] } });
     }
     if (q.length > 80) {
       return NextResponse.json({ error: 'Query too long' }, { status: 400 });
@@ -313,11 +489,16 @@ async function getHandler(req) {
     const db = sessionClient || anon;
     const want = (s) => scope === 'all' || scope === s;
 
-    const [people, roasts, communitiesRes, challenges, topics, hashtags] = await Promise.all([
+    // Taxonomy-backed query understanding (soft hints for discovery UI).
+    const semanticTopics = understandQuery(q);
+
+    const [people, roasts, photos, communitiesRes, challenges, battles, topics, hashtags] = await Promise.all([
       want('people') ? searchPeople(db, q, userId, limit) : Promise.resolve([]),
       want('roasts') || want('hashtags') ? searchRoasts(db, q, userId, limit) : Promise.resolve([]),
+      want('photos') ? searchRoasts(db, q, userId, limit, { photoOnly: true }) : Promise.resolve([]),
       want('communities') ? searchCommunities({ q, sort: 'newest', limit, offset: 0, userId }) : Promise.resolve([]),
       want('challenges') ? searchChallenges(db, q, limit) : Promise.resolve([]),
+      want('battles') ? searchBattles(db, q, userId, limit, battleStatus) : Promise.resolve([]),
       want('topics') || scope === 'all' ? searchTopics(db, q, scope === 'all' ? 6 : limit) : Promise.resolve([]),
       want('hashtags') ? searchHashtags(db, q, limit) : Promise.resolve({ tags: [], posts: [] }),
     ]);
@@ -325,17 +506,51 @@ async function getHandler(req) {
     const communities = Array.isArray(communitiesRes) ? communitiesRes : communitiesRes?.communities || [];
     const suggestions = scope === 'all' || scope === 'topics' ? await suggestTopics(db, q) : [];
 
+    // Related searches from REAL co-occurring tags (never fabricated).
+    const queryTag = (normalizeTag(q) || q.replace(/\s+/g, '')).toLowerCase();
+    const related = [...new Set(
+      (hashtags.tags || [])
+        .map((t) => String(t.tag || '').toLowerCase())
+        .filter((t) => t && t !== queryTag)
+    )].slice(0, 5);
+
+    // Typo tolerance: suggest only when direct results are empty.
+    const hasDirect = people.length > 0 || roasts.length > 0 || photos.length > 0
+      || communities.length > 0 || challenges.length > 0 || battles.length > 0 || topics.length > 0;
+    const didYouMean = hasDirect
+      ? null
+      : didYouMean(q, { topics, communities, tags: hashtags.tags || [] });
+
+    // Privacy-aware analytics + trending log (fire-and-forget, no raw PII:
+    // the SQL function refuses emails, phones, and @handles; retention 8d).
+    const resultCount = people.length + roasts.length + photos.length + communities.length
+      + challenges.length + battles.length + topics.length + (hashtags.tags || []).length;
+    try {
+      const { recordGrowthEvent } = await import('@/lib/experimentService');
+      recordGrowthEvent('search_performed', userId || null, {
+        scope, results: resultCount, zero: resultCount === 0,
+      }).catch(() => {});
+    } catch {}
+    try {
+      supabaseLogSearch(supabaseAnonymous(anon), q, scope, userId);
+    } catch {}
+
     return NextResponse.json({
       success: true,
       query: q,
       scope,
       people,
       roasts,
+      photos,
       communities,
       challenges,
+      battles,
       topics,
       hashtags,
       suggestions,
+      related,
+      didYouMean,
+      semantic: { topics: semanticTopics, synonyms: intentSynonyms(q) },
     });
   } catch (err) {
     console.error('[Search] Error:', err);
