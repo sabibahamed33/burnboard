@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Globe, ChevronDown } from 'lucide-react';
-import { getLanguage, setLanguage, SUPPORTED_LANGUAGES } from '@/lib/lang';
+import { getLanguage, setLanguage, pushLanguageToAccount, syncLanguageFromAccount, SUPPORTED_LANGUAGES } from '@/lib/lang';
 
 /**
  * LanguageSwitcher — Accessible language selector.
@@ -14,6 +14,10 @@ export default function LanguageSwitcher() {
 
   useEffect(() => {
     setCurrentLang(getLanguage());
+    // Pull the signed-in account preference (per-account, no leaks).
+    syncLanguageFromAccount().then((synced) => {
+      if (synced) setCurrentLang(synced);
+    }).catch(() => {});
     const handler = (e) => {
       setCurrentLang(e.detail);
     };
@@ -23,6 +27,7 @@ export default function LanguageSwitcher() {
 
   const handleSelect = (code) => {
     setLanguage(code);
+    pushLanguageToAccount(code);
     setCurrentLang(code);
     setIsOpen(false);
     // Reload to apply translations across all components

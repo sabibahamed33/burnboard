@@ -44,7 +44,7 @@ GROSS → payment processing fee → platform fee → creator earnings (net)
 
 The split is **centralized policy** (`REVENUE_SPLIT` in
 `lib/monetization/config.js`, env-tunable): platform fee 15%, processing 3%,
-creator keeps 82%. Percentages are shown to creators in the Creator Studio
+creator keeps 82%. Percentages are shown to users in their Insights revenue view
 Revenue tab — fees are never hidden. The take rate is competitive,
 transparent, and periodically reviewed; changes require clear communication.
 

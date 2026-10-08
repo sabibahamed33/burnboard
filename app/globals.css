@@ -481,3 +481,25 @@ img, video, canvas { max-width: 100%; height: auto; }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes bb-spin { to { transform: rotate(360deg); } }
+
+/* ── Global language support (Phase 6/7/32) ──
+   Bengali needs generous line-height + a Bengali-capable font fallback
+   (system fonts render Bengali; Noto picked up when installed). RTL is
+   driven by html[dir] — only .rtl-flip icons mirror, never whole layouts. */
+html[lang="bn"] body {
+  line-height: 1.75;
+  font-family: var(--font-sans, ui-sans-serif, system-ui), "Noto Sans Bengali", "Hind Siliguri", sans-serif;
+}
+html[dir="rtl"] .rtl-flip {
+  transform: scaleX(-1);
+}
+html[dir="rtl"] input,
+html[dir="rtl"] textarea {
+  text-align: right;
+}
+html[dir="rtl"] input[type="email"],
+html[dir="rtl"] input[type="url"],
+html[dir="rtl"] input[type="tel"] {
+  text-align: left;
+  direction: ltr;
+}

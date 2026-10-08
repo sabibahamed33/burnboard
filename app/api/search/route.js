@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getRequestContext } from '@/lib/routeAuth';
 import { rateLimitMiddleware, getClientIp, ipKey, RATE_LIMITS } from '@/lib/serverRateLimit';
 import { hiddenAuthorIds } from '@/lib/safety';
+import { sanitizeSearchQuery } from '@/lib/unicode';
 import { searchCommunities } from '@/lib/communities';
 import { normalizeQuery, normalizeTag, aggregateTags, extractTags } from '@/lib/hashtags';
 import { instrumentHandler } from '@/lib/metrics';
@@ -35,11 +36,13 @@ const MAX_LIMIT = 20;
 
 /**
  * Strip characters that break PostgREST `or()` filter syntax or act as
- * LIKE wildcards. The surrounding %...% for contains-match is added by
- * each caller, so user-supplied wildcards are never honored.
+ * LIKE wildcards. Unicode-safe: NFC-normalizes and drops bidi/invisible
+ * controls first so multilingual queries can't crash or spoof search.
+ * The surrounding %...% for contains-match is added by each caller, so
+ * user-supplied wildcards are never honored.
  */
 function sanitizeLike(q) {
-  return String(q || '').replace(/[,()"%_\\]/g, '').trim();
+  return sanitizeSearchQuery(q).replace(/[,()"%_\\]/g, '').trim();
 }
 
 function freshnessDecay(createdAt, halfLifeHours = 48) {

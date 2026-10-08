@@ -8,6 +8,17 @@ export const metadata = {
   metadataBase: new URL('https://burnboard.app'),
   title: 'BURNBOARD - Get Roasted by Real Humans | 100% Anonymous',
   description: 'No AI. Just humans roasting humans. The brutal, anonymous social media roast platform with live leaderboards, roast battles, and zero filter.',
+  alternates: {
+    canonical: 'https://burnboard.app',
+    languages: {
+      'en-US': 'https://burnboard.app',
+      'bn-BD': 'https://burnboard.app',
+      'es-ES': 'https://burnboard.app',
+      'fr-FR': 'https://burnboard.app',
+      'ar-EG': 'https://burnboard.app',
+      'hi-IN': 'https://burnboard.app',
+    },
+  },
   keywords: [
     'roast me',
     'anonymous roasts',

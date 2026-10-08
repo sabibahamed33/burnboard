@@ -44,7 +44,7 @@ Monetization must feel like a natural extension of user value — never
 - **MP24 additions:**
   - **Creator payout requests** — `request_creator_payout` RPC (owner-scoped,
     minimum threshold, single open payout, audited) + `POST /api/creator/revenue`
-    + request UI in the Creator Studio Revenue tab
+    + request UI in the Insights Revenue tab
   - **Transparent revenue share** — creators see the exact centralized split
     (82% creator / 15% platform / 3% processing) and payout minimum in the
     Studio

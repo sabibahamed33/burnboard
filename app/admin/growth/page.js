@@ -166,7 +166,7 @@ export default function AdminGrowthPage() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
             <StatCard icon={<Network className="w-3.5 h-3.5" />} label="Network" value={fmt(s.network?.followsPerActiveUser)} sub={`${fmt(s.network?.totalFollows)} follows · ${fmt(s.network?.activeUsers30d)} actives`} />
-            <StatCard icon={<Sprout className="w-3.5 h-3.5" />} label="Creators (7d)" value={fmt(s.creators?.active7d)} sub="authors with content" />
+            <StatCard icon={<Sprout className="w-3.5 h-3.5" />} label="Authors (7d)" value={fmt(s.creators?.active7d)} sub="authors with content" />
             <StatCard icon={<Building2 className="w-3.5 h-3.5" />} label="Communities" value={fmt(s.communities?.total)} sub={`+${fmt(s.communities?.new7d)} new · ${fmt(s.communities?.active7d)} active`} />
             <StatCard icon={<Globe2 className="w-3.5 h-3.5" />} label="Regions" value={(s.regions || []).length} sub={(s.regions || []).slice(0, 3).map((r) => `${r.locale}:${r.users}`).join(' · ')} />
           </div>

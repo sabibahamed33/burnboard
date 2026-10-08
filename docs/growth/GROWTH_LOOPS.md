@@ -85,7 +85,7 @@ and only modestly — see `REP_EVENTS.CHALLENGE_PARTICIPATED`).
 
 ## 5. Battle viral loop
 
-**Mechanism:** user starts a battle → invites a friend/creator → audience
+**Mechanism:** user starts a battle → invites a friend → audience
 participates → the result is shareable → new users discover the battle → new
 battles start.
 
@@ -100,18 +100,18 @@ community identity.
 
 **Safeguards:** no mass-invite incentives; community invites are member
 intent-driven; empty communities are never promoted (seeding uses real
-creators/hosts, never fake members).
+users/hosts, never fake members).
 
-## 7. Creator growth loop
+## 7. User growth loop
 
-**Mechanism:** creator joins → finds an audience → creates content →
-audience shares → new audience discovers the creator → new creators see the
+**Mechanism:** user joins → finds an audience → creates content →
+audience shares → new audience discovers the user → new users see the
 opportunity → more content supply.
 
-**Surfaces:** `/creator` (private Creator Studio), public profiles, creator
+**Surfaces:** `/insights` (private user insights), public profiles, user
 analytics.
 
-**Safeguards:** no promise of instant fame; analytics are real; creators can
+**Safeguards:** no promise of instant fame; analytics are real; users can
 always point people at their BurnBoard profile — never at paid or fake
 growth.
 

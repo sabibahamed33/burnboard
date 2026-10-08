@@ -4,9 +4,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Gift, Loader2, X, Lock } from 'lucide-react';
 
 /**
- * TipModal — \"Support this creator\" voluntary one-time tips (Master Prompt 15).
+ * TipModal — "Support this user" voluntary one-time tips (Master Prompt 15).
  *
- * Fetches the creator's standardized tip tiers (POST /api/monetization/tip),
+ * Fetches the user's standardized tip tiers (POST /api/monetization/tip),
  * then starts a provider checkout for the chosen amount. Every payment is
  * verified server-side by the webhook pipeline; supporters never enter card
  * data here and no card data is ever stored. Self-tips are rejected by the

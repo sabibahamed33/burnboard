@@ -166,19 +166,19 @@ export default function AdminAiPage() {
           {/* Ecosystem + fairness */}
           <Section title="Ecosystem health & fairness (bounded engagement sample)">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatCard icon={<Users className="w-3.5 h-3.5" />} label="Creators reached" value={fmt(e.creatorsReached7d)} sub={`of ${fmt(e.sampleSize)} sampled signals`} />
+              <StatCard icon={<Users className="w-3.5 h-3.5" />} label="Users reached" value={fmt(e.creatorsReached7d)} sub={`of ${fmt(e.sampleSize)} sampled signals`} />
               <StatCard
                 icon={<Share2 className="w-3.5 h-3.5" />}
                 label="Top-10 concentration"
                 value={e.top10Concentration === null ? '—' : `${Math.round(e.top10Concentration * 100)}%`}
-                sub="top creators' share of sample"
+                sub="top users' share of sample"
                 tone={e.top10Concentration > 0.55 ? 'warn' : 'ok'}
               />
               <StatCard
                 icon={<Sprout className="w-3.5 h-3.5" />}
-                label="New-creator share"
+                label="New-user share"
                 value={pct(e.newCreatorShare)}
-                sub={`${fmt(e.newCreatorCount)} creators < 90 days old`}
+                sub={`${fmt(e.newCreatorCount)} users < 90 days old`}
                 tone={e.newCreatorShare < 0.1 ? 'warn' : 'ok'}
               />
               <StatCard icon={<Network className="w-3.5 h-3.5" />} label="Communities reached" value={fmt(e.communitiesReached7d)} sub="distinct in sample" />
@@ -189,7 +189,7 @@ export default function AdminAiPage() {
               </div>
             )}
             <p className="mt-2 text-[11px] text-zinc-600 font-mono">
-              Concentration and new-creator share are measured over the most recent {fmt(e.sampleSize)} engagement
+              Concentration and new-user share are measured over the most recent {fmt(e.sampleSize)} engagement
               signals (reactions, comments, replies, shares, follows, votes) — a bounded sample, never a census.
             </p>
           </Section>
@@ -246,7 +246,7 @@ export default function AdminAiPage() {
           <p className="text-[11px] text-zinc-500 font-mono leading-relaxed flex items-start gap-2">
             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <span>
-              Every figure is computed from real rows — nothing is fabricated. Concentration / new-creator share are
+              Every figure is computed from real rows — nothing is fabricated. Concentration / new-user share are
               bounded samples; impression counts are deduped per item per day, so derived rates are trend indicators.
               This is the measurement layer for ranking experiments: a ranking change that trips the negative-feedback
               or concentration signals is a rollback candidate (docs/ai/AI_HEALTH.md). Full population analytics,

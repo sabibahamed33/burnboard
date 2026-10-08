@@ -26,6 +26,25 @@ async function getHandler(req) {
     const window = searchParams.get('window') || 'now';
     const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 50);
 
+    // Regional discovery scope (coarse, privacy-safe — no GPS, no tracking).
+    // `global` ranks worldwide; `country` + ISO `region` (e.g. BD, US) scopes
+    // the response envelope. Ranking stays quality/velocity-based everywhere;
+    // regional breakdowns activate as coarse locale signals accumulate.
+    const scope = (searchParams.get('scope') || 'global').toLowerCase();
+    const region = (searchParams.get('region') || '').toUpperCase();
+    if (!['global', 'country'].includes(scope)) {
+      return NextResponse.json(
+        { error: 'Invalid scope. Must be one of: global, country' },
+        { status: 400 }
+      );
+    }
+    if (region && !/^[A-Z]{2}$/.test(region)) {
+      return NextResponse.json({ error: 'Invalid region. Use ISO country code.' }, { status: 400 });
+    }
+    if (scope === 'country' && !region) {
+      return NextResponse.json({ error: 'region is required when scope=country' }, { status: 400 });
+    }
+
     // Validate window
     if (!TIME_WINDOWS[window]) {
       return NextResponse.json(
@@ -45,8 +64,8 @@ async function getHandler(req) {
 
     const start = Date.now();
     
-    // Cache trending data per type+window combination
-    const cacheKey = `trending:${type}:${window}:${limit}`;
+    // Cache trending data per type+window+scope combination
+    const cacheKey = `trending:${type}:${window}:${limit}:${scope}:${region || 'all'}`;
     
     const result = await cacheAside(
       cacheKey,
@@ -76,10 +95,12 @@ async function getHandler(req) {
     log.info('Trending fetched', {
       type,
       window,
+      scope,
+      region: region || null,
       durationMs: Date.now() - start,
     });
 
-    return NextResponse.json({ success: true, ...result });
+    return NextResponse.json({ success: true, scope, region: region || null, ...result });
   } catch (err) {
     console.error('[Trending] Error:', err);
     return NextResponse.json(

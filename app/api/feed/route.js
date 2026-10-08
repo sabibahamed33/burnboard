@@ -239,7 +239,11 @@ async function getHandler(req) {
     // ── FOR YOU ──────────────────────────────────────────────
     // Personalized ranking for signed-in users with personalization enabled.
     if (authed) {
-      const state = await buildViewerState({ client: sessionClient, userId });
+      const langHint = (() => {
+        const raw = (searchParams.get('lang') || '').toLowerCase().split(/[-_]/)[0];
+        return /^[a-z]{2}$/.test(raw) ? raw : null;
+      })();
+      const state = await buildViewerState({ client: sessionClient, userId, locale: langHint });
       if (state && state.enabled) {
         const offset = cursor ? (parseInt(cursor, 10) || 0) : 0;
         // Session impression-awareness: the client sends ids it already

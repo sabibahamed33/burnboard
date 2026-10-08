@@ -218,7 +218,7 @@ export default function CreatorDashboard() {
   if (error || !data || !data.profile) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
-        <div className="max-w-4xl mx-auto bg-[#111] border border-[#222] rounded-2xl p-10 text-center space-y-4">            <p className="text-sm text-red-400 font-mono">{error || 'Could not load your creator data yet. If this is your first time here, make sure the creator migration has been applied.'}</p>
+        <div className="max-w-4xl mx-auto bg-[#111] border border-[#222] rounded-2xl p-10 text-center space-y-4">            <p className="text-sm text-red-400 font-mono">{error || 'Could not load your insights yet. Please try again.'}</p>
           <button
             onClick={loadDashboard}
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#ff4d00] text-black font-bold text-xs rounded-xl"
