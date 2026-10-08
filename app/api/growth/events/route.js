@@ -50,6 +50,10 @@ const VALID_EVENT_TYPES = [
   // Search discovery (privacy-aware: scope + counts only, never raw PII)
   'search_performed',
   'search_result_opened',
+
+  // Notification center (aggregated UX signals, no message contents)
+  'notification_opened',
+  'notification_preference_changed',
   
   // Retention
   'notification_opened',

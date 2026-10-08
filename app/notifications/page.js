@@ -31,20 +31,20 @@ const TYPE_CONFIG = {
   achievement_unlocked: { emoji: '🏆', label: 'Achievement', color: 'text-amber-400' },
   dm:              { emoji: '💬', label: 'Message', color: 'text-sky-400' },
   billing:          { emoji: '💳', label: 'Billing', color: 'text-emerald-400' },
+  safety_notice:    { emoji: '🛡️', label: 'Safety Notice', color: 'text-amber-400' },
 };
 
-// ── Filter Tabs (only categories the product actually emits) ─
+// ── Activity Center tabs (server-backed categories; only emitted ones) ─
 const FILTERS = [
-  { key: 'all', label: 'All', types: null },
-  { key: 'followers', label: 'Followers', types: ['follow'] },
-  { key: 'reactions', label: 'Reactions', types: ['reaction_activity', 'burn_score_milestone'] },
-  { key: 'comments', label: 'Comments', types: ['comment', 'reply'] },
-  { key: 'mentions', label: 'Mentions', types: ['mention'] },
-  { key: 'battles', label: 'Battles', types: ['battle_invite', 'battle_ready', 'battle_result'] },
-  { key: 'communities', label: 'Communities', types: ['community_joined', 'community_role_changed', 'community_join_request', 'community_join_approved'] },
-  { key: 'challenges', label: 'Challenges', types: ['challenge_invite', 'challenge_result'] },
-  { key: 'progress', label: 'Progress', types: ['level_up', 'achievement_unlocked', 'milestone', 'creator_milestone'] },
-  { key: 'messages', label: 'Messages', types: ['dm'] },
+  { key: 'all', label: 'All', category: null },
+  { key: 'mentions', label: 'Mentions', category: 'mentions' },
+  { key: 'social', label: 'Social', category: 'social' },
+  { key: 'communities', label: 'Communities', category: 'communities' },
+  { key: 'battles', label: 'Battles', category: 'battles' },
+  { key: 'challenges', label: 'Challenges', category: 'challenges' },
+  { key: 'achievements', label: 'Achievements', category: 'achievements' },
+  { key: 'messages', label: 'Messages', category: 'messages' },
+  { key: 'system', label: 'System', category: 'system' },
 ];
 
 // ── Time Ago ─────────────────────────────────────────────────
@@ -67,58 +67,115 @@ function timeAgo(dateString) {
 function NotificationItem({ notification, onRead }) {
   const config = TYPE_CONFIG[notification.type] || { emoji: '🔔', label: 'Notification', color: 'text-zinc-400' };
   const isUnread = !notification.is_read;
+  const isImportant = (notification.priority || 0) >= 2;
+  const [gone, setGone] = useState(false);
+  const [checking, setChecking] = useState(false);
 
-  const handleClick = async () => {
+  const trackOpened = () => {
+    try {
+      fetch('/api/growth/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType: 'notification_opened', subjectId: notification.id, metadata: { type: notification.type } }),
+      }).catch(() => {});
+    } catch {}
+  };
+
+  // Deleted-target guard: post/roast links are verified against the same
+  // RLS-scoped reads as the destination pages. Gone/private content renders
+  // a tombstone instead of a broken link. Other destinations (profiles,
+  // communities, threads) navigate directly — those pages fail gracefully.
+  const handleClick = async (e) => {
     if (isUnread) {
       await onRead(notification.id);
     }
+    trackOpened();
+    const link = notification.link || '';
+    const m = link.match(/^\/(post|r)\/([A-Za-z0-9_-]{1,120})$/);
+    if (!m || gone) {
+      if (!m) return;
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    setChecking(true);
+    try {
+      const type = m[1] === 'r' ? 'roast' : 'social_post';
+      const res = await fetch(`/api/content/exists?type=${type}&id=${encodeURIComponent(m[2])}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.exists === false) {
+        setGone(true);
+        return;
+      }
+      window.location.href = link;
+    } catch {
+      window.location.href = link;
+    } finally {
+      setChecking(false);
+    }
   };
 
-  return (
-    <Link href={notification.link || '#'}>
-      <div
-        onClick={handleClick}
-        className={`flex items-start gap-4 p-4 rounded-2xl transition-all cursor-pointer group ${
-          isUnread 
-            ? 'bg-[#ff4d00]/5 border border-[#ff4d00]/20 hover:border-[#ff4d00]/40' 
-            : 'bg-[#111] border border-[#222] hover:border-[#333]'
-        }`}
-      >
-        {/* Icon */}
-        <div className={`text-2xl shrink-0 mt-0.5 ${config.color}`}>
-          {config.emoji}
-        </div>
+  const inner = (
+    <div
+      onClick={handleClick}
+      role={notification.link ? 'link' : undefined}
+      aria-label={isUnread ? `Unread: ${notification.title}` : notification.title}
+      className={`flex items-start gap-4 p-4 rounded-2xl transition-all cursor-pointer group ${
+        isUnread
+          ? 'bg-[#ff4d00]/5 border border-[#ff4d00]/20 hover:border-[#ff4d00]/40'
+          : 'bg-[#111] border border-[#222] hover:border-[#333]'
+      }`}
+    >
+      {/* Icon */}
+      <div className={`text-2xl shrink-0 mt-0.5 ${config.color}`}>
+        {config.emoji}
+      </div>
 
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className={`text-[10px] font-mono font-bold uppercase tracking-wider ${config.color}`}>
-              {config.label}
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <span className={`text-[10px] font-mono font-bold uppercase tracking-wider ${config.color}`}>
+            {config.label}
+          </span>
+          {isImportant && (
+            <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[9px] font-mono font-bold uppercase text-amber-300">
+              Important
             </span>
-            {isUnread && (
-              <span className="w-1.5 h-1.5 rounded-full bg-[#ff4d00] animate-pulse" />
-            )}
-          </div>
-          <p className={`text-sm leading-relaxed ${isUnread ? 'text-white font-bold' : 'text-zinc-300'}`}>
-            {notification.title}
-          </p>
-          <p className="text-[11px] text-zinc-500 mt-1">
-            {notification.message}
-          </p>
-          <div className="flex items-center gap-3 mt-2">
-            <span className="text-[10px] text-zinc-600 font-mono">
-              {timeAgo(notification.created_at)}
+          )}
+          {isUnread && (
+            <span className="w-1.5 h-1.5 rounded-full bg-[#ff4d00] animate-pulse" aria-hidden="true" />
+          )}
+        </div>
+        <p className={`text-sm leading-relaxed ${isUnread ? 'text-white font-bold' : 'text-zinc-300'}`}>
+          {notification.title}
+        </p>
+        <p className="text-[11px] text-zinc-500 mt-1">
+          {notification.message}
+        </p>
+        <div className="flex items-center gap-3 mt-2">
+          <span className="text-[10px] text-zinc-600 font-mono">
+            {timeAgo(notification.created_at)}
+          </span>
+          {gone ? (
+            <span className="text-[10px] font-mono text-zinc-500">
+              This content is no longer available.
             </span>
-            {notification.link && (
-              <span className="text-[10px] font-mono text-[#ff4d00] group-hover:text-white transition-colors">
-                View →
-              </span>
-            )}
-          </div>
+          ) : notification.link ? (
+            <span className="text-[10px] font-mono text-[#ff4d00] group-hover:text-white transition-colors">
+              {checking ? 'Checking…' : 'View →'}
+            </span>
+          ) : null}
         </div>
       </div>
-    </Link>
+    </div>
   );
+
+  // Links render as anchors for keyboard/screen-reader navigation; the
+  // click handler above may intercept for the deleted-target check.
+  if (notification.link && !gone) {
+    return <a href={notification.link}>{inner}</a>;
+  }
+  return inner;
 }
 
 // ── Main Page ────────────────────────────────────────────────
@@ -131,38 +188,74 @@ export default function NotificationsPage() {
   const [userId, setUserId] = useState(null);
   // Realtime dedup: one genuine event must never render twice.
   const seenIdsRef = useRef(new Set());
+  const [cursor, setCursor] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
+
+  const fetchPage = useCallback(async ({ reset = false, cursorValue = null } = {}) => {
+    const active = FILTERS.find((f) => f.key === filterRef.current) || FILTERS[0];
+    const params = new URLSearchParams({ limit: '20', sort: 'smart' });
+    if (active.category) params.set('category', active.category);
+    if (cursorValue) params.set('cursor', JSON.stringify(cursorValue));
+    const res = await fetch(`/api/notifications?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error || !data.success) {
+      throw new Error(data.error || 'Request failed');
+    }
+    return data;
+  }, []);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     setError('');
+    setCursor(null);
     try {
-      const res = await fetch('/api/notifications?limit=50');
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) {
-        throw new Error(data.error || 'Request failed');
+      const data = await fetchPage({ reset: true });
+      const list = data.notifications || [];
+      const set = seenIdsRef.current;
+      set.clear();
+      for (const n of list) {
+        if (n?.id) set.add(n.id);
       }
-      if (data.success) {
-        const list = data.notifications || [];
-        const set = seenIdsRef.current;
-        for (const n of list) {
-          if (n?.id) set.add(n.id);
-        }
-        setNotifications(list);
-        setUnreadCount(data.count || 0);
-      } else {
-        throw new Error('Request failed');
-      }
+      setNotifications(list);
+      setUnreadCount(data.count || 0);
+      setCursor(data.nextCursor || null);
+      setHasMore(!!data.nextCursor && list.length >= 20);
     } catch {
       // Never crash the page — show a friendly retry state.
       setError("Couldn't load notifications.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchPage]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !cursor) return;
+    setLoadingMore(true);
+    try {
+      const data = await fetchPage({ cursorValue: cursor });
+      const list = data.notifications || [];
+      const set = seenIdsRef.current;
+      const fresh = list.filter((n) => {
+        if (!n?.id || set.has(n.id)) return false;
+        set.add(n.id);
+        return true;
+      });
+      setNotifications((prev) => [...prev, ...fresh]);
+      setCursor(data.nextCursor || null);
+      setHasMore(!!data.nextCursor && list.length >= 20);
+    } catch {
+      // Keep existing items; user can retry.
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [cursor, fetchPage, loadingMore]);
 
   useEffect(() => {
     fetchNotifications();
-  }, [fetchNotifications]);
+  }, [fetchNotifications, filter]);
 
   // Resolve the signed-in user for the realtime subscription.
   useEffect(() => {
@@ -253,10 +346,36 @@ export default function NotificationsPage() {
     }
   };
 
+  // ── Clear read history (unread items are always kept) ───────
+  const handleClearRead = async () => {
+    const kept = notifications.filter(n => !n.is_read);
+    setNotifications(kept);
+    try {
+      await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear_read: true }),
+      });
+    } catch {
+      // Optimistic; server converges on next load.
+    }
+  };
+
   const activeFilter = FILTERS.find(f => f.key === filter) || FILTERS[0];
-  const visible = activeFilter.types
-    ? notifications.filter(n => activeFilter.types.includes(n.type))
-    : notifications;
+  // Filtering is server-side (category param); the list renders as returned.
+  const visible = notifications;
+
+  // Visibility-aware fallback: realtime can drop on flaky networks — a
+  // bounded 60s refetch while the tab is visible keeps counts accurate
+  // without new subscriptions or duplicate inserts.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        fetchNotifications();
+      }
+    }, 60000);
+    return () => window.clearInterval(id);
+  }, [fetchNotifications]);
 
   // ── Loading State ────────────────────────────────────────
   if (loading) {
@@ -327,15 +446,24 @@ export default function NotificationsPage() {
             <ArrowLeft className="w-4 h-4" />
             <span>BURN BOARD</span>
           </Link>
-          {unreadCount > 0 && (
-            <button
-              onClick={handleMarkAllRead}
+          <div className="flex items-center gap-1">
+            <Link
+              href="/settings/notifications"
+              aria-label="Notification settings"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-mono font-bold text-zinc-400 hover:text-white hover:bg-[#1a1a1a] transition-all min-h-[44px]"
             >
-              <CheckCheck className="w-3.5 h-3.5" />
-              Mark All Read
-            </button>
-          )}
+              Settings
+            </Link>
+            {unreadCount > 0 && (
+              <button
+                onClick={handleMarkAllRead}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-mono font-bold text-zinc-400 hover:text-white hover:bg-[#1a1a1a] transition-all min-h-[44px]"
+              >
+                <CheckCheck className="w-3.5 h-3.5" />
+                Mark All Read
+              </button>
+            )}
+          </div>
         </header>
 
         {/* Title */}
@@ -384,6 +512,21 @@ export default function NotificationsPage() {
                 onRead={handleMarkRead}
               />
             ))}
+            {hasMore && (
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="w-full min-h-[44px] rounded-2xl border border-[#222] bg-[#111] text-xs font-mono font-bold text-zinc-300 hover:text-white hover:border-[#333] transition-all disabled:opacity-50"
+              >
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+            <button
+              onClick={handleClearRead}
+              className="w-full min-h-[44px] rounded-2xl text-[11px] font-mono text-zinc-600 hover:text-red-400 transition-colors"
+            >
+              Clear read notifications
+            </button>
           </div>
         ) : notifications.length > 0 ? (
           /* Filtered empty state */

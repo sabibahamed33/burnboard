@@ -14,14 +14,33 @@ import { isPlatformModeratorClient, moderatorRestrictUser, moderatorLiftRestrict
 const RESTRICT_TYPES = ['post', 'comment', 'community_create', 'community_join', 'challenge_create', 'invite', 'battle', 'report', 'all'];
 
 async function notifyUser(client, userId, title, body) {
+  // Schema-correct safety notice: the notifications table carries
+  // title/message/link (+priority/category), never body/metadata.
+  // High priority + system category so it surfaces in the Activity Center.
+  // A legacy-shaped fallback covers databases where the migration that
+  // adds priority/category has not been applied yet.
+  const full = {
+    user_id: userId,
+    type: 'safety_notice',
+    title,
+    message: body,
+    link: '/settings/safety',
+    is_read: false,
+    priority: 2,
+    category: 'system',
+  };
   try {
-    await client.from('notifications').insert({
-      user_id: userId,
-      type: 'safety_notice',
-      title,
-      body,
-      metadata: { category: 'safety' },
-    });
+    const { error } = await client.from('notifications').insert(full);
+    if (error && /priority|category|column/i.test(error.message || '')) {
+      await client.from('notifications').insert({
+        user_id: userId,
+        type: 'safety_notice',
+        title,
+        message: body,
+        link: '/settings/safety',
+        is_read: false,
+      });
+    }
   } catch {}
 }
 

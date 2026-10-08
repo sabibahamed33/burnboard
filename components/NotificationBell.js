@@ -25,7 +25,11 @@ const TYPE_CONFIG = {
   challenge_invite:  { emoji: '🎯', color: 'text-[#ff4d00]' },
   challenge_result:  { emoji: '🏆', color: 'text-amber-400' },
   milestone:         { emoji: '🏆', color: 'text-amber-400' },
+  level_up:          { emoji: '⚡', color: 'text-[#ff4d00]' },
+  achievement_unlocked: { emoji: '🏆', color: 'text-amber-400' },
+  dm:                { emoji: '💬', color: 'text-sky-400' },
   billing:           { emoji: '💳', color: 'text-emerald-400' },
+  safety_notice:     { emoji: '🛡️', color: 'text-amber-400' },
 };
 
 // ── Time Ago Helper ──────────────────────────────────────────
