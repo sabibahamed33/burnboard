@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { CommunityCard } from '@/components/communities';
 import { track } from '@/lib/analytics';
+import { getMutedCommunityIds } from '@/lib/communityMute';
 
 /**
  * /c — Communities Hub
@@ -87,6 +88,15 @@ export default function CommunitiesHubPage() {
   const searched = searchData?.communities || [];
   const newest = newestData?.communities || [];
   const popular = popularData?.communities || [];
+
+  // Muted communities stay out of discovery rails (your own memberships
+  // are never hidden — muting only quiets discovery, not belonging).
+  const [mutedIds, setMutedIds] = useState(new Set());
+  useEffect(() => {
+    setMutedIds(getMutedCommunityIds());
+  }, [debouncedQuery]);
+  const visibleNewest = newest.filter(c => !mutedIds.has(String(c.id)));
+  const visiblePopular = popular.filter(c => !mutedIds.has(String(c.id)));
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 font-sans">
@@ -218,20 +228,20 @@ export default function CommunitiesHubPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {newest.map(c => <CommunityCard key={c.id} community={c} />)}
+                {visibleNewest.map(c => <CommunityCard key={c.id} community={c} />)}
               </div>
             )}
           </section>
         )}
 
         {/* Most members */}
-        {!debouncedQuery && popular.length > 0 && (
+        {!debouncedQuery && visiblePopular.length > 0 && (
           <section className="space-y-3">
             <h2 className="text-sm font-black text-white uppercase tracking-wider font-mono">
               Most Members
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {popular.map(c => <CommunityCard key={c.id} community={c} />)}
+              {visiblePopular.map(c => <CommunityCard key={c.id} community={c} />)}
             </div>
           </section>
         )}

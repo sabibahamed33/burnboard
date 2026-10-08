@@ -4,14 +4,19 @@ import { getRequestContext } from '@/lib/routeAuth';
 import { hiddenAuthorIds } from '@/lib/safety';
 
 /**
- * GET /api/communities/[id]/feed?limit=&cursor=
+ * GET /api/communities/[id]/feed?limit=&cursor=&sort=new|top&media=1
  *
  * Community feed built on the canonical social_posts table — the same content
  * records that appear across the platform, with the community as context.
  * Items are shaped exactly like /api/feed items, so FeedCard, reactions,
  * comments, and detail pages work unchanged.
  *
- * Private-community enforcement happens here too: non-members get 403.
+ * sort=new (default): chronological with cursor paging.
+ * sort=top: engagement-first snapshot (first page only, no cursor).
+ * media=1: photo posts only (combines with either sort).
+ *
+ * Privacy enforcement happens here too: private communities return 403 for
+ * non-members; hidden communities return 404 (never reveal existence).
  */
 
 export async function GET(req, { params }) {
@@ -20,17 +25,23 @@ export async function GET(req, { params }) {
     const { searchParams } = new URL(req.url);
     const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 50);
     const cursor = searchParams.get('cursor');
+    const sort = searchParams.get('sort') === 'top' ? 'top' : 'new';
+    const mediaOnly = searchParams.get('media') === '1';
 
     const community = await getCommunityById(id);
     if (!community) {
       return NextResponse.json({ error: 'Community not found' }, { status: 404 });
     }
 
-    // Privacy enforcement at the data layer (not just hidden UI)
+    // Privacy enforcement at the data layer (not just hidden UI).
+    // Hidden communities never reveal their existence to outsiders.
     if (community.visibility !== 'public') {
       const { client, userId } = await getRequestContext(req);
       if (!userId) {
-        return NextResponse.json({ error: 'This community is private' }, { status: 403 });
+        return NextResponse.json(
+          { error: community.visibility === 'hidden' ? 'Community not found' : 'This community is private' },
+          { status: community.visibility === 'hidden' ? 404 : 403 }
+        );
       }
       const { data: membership } = await client
         .from('community_members')
@@ -40,7 +51,10 @@ export async function GET(req, { params }) {
         .eq('membership_status', 'active')
         .maybeSingle();
       if (!membership) {
-        return NextResponse.json({ error: 'This community is private' }, { status: 403 });
+        return NextResponse.json(
+          { error: community.visibility === 'hidden' ? 'Community not found' : 'This community is private' },
+          { status: community.visibility === 'hidden' ? 404 : 403 }
+        );
       }
     }
 
@@ -51,7 +65,7 @@ export async function GET(req, { params }) {
     const { client: viewerClient, userId: viewerId } = await getRequestContext(req);
     let visibleItems = null;
     if (viewerClient && viewerId) {
-      const { items: rawItems, nextCursor: rawCursor } = await getCommunityFeed(id, { limit, cursor });
+      const { items: rawItems, nextCursor: rawCursor } = await getCommunityFeed(id, { limit, cursor, sort, mediaOnly });
       const hidden = await hiddenAuthorIds(
         viewerClient,
         viewerId,
@@ -69,7 +83,7 @@ export async function GET(req, { params }) {
       });
     }
 
-    const { items, nextCursor } = await getCommunityFeed(id, { limit, cursor });
+    const { items, nextCursor } = await getCommunityFeed(id, { limit, cursor, sort, mediaOnly });
 
     // Growth analytics (non-critical)
     try {

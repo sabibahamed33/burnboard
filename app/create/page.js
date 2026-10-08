@@ -105,6 +105,7 @@ export default function CreatePage() {
   const [targetCommunityId, setTargetCommunityId] = useState('public');
   const [myCommunities, setMyCommunities] = useState([]);
   const [communityPickerOpen, setCommunityPickerOpen] = useState(false);
+  const [targetCommunityRules, setTargetCommunityRules] = useState([]);
 
   // Challenge entry context (from /challenges/[slug] → /create?challenge=...)
   const [challengeCtx, setChallengeCtx] = useState(null);
@@ -215,6 +216,25 @@ export default function CreatePage() {
     if (targetCommunityId !== 'public') {
       track('community_create_opened', { communityId: targetCommunityId });
     }
+  }, [targetCommunityId]);
+
+  // House rules of the target community — shown before posting so members
+  // see expectations where they act (moderators enforce, UI only displays).
+  useEffect(() => {
+    if (!targetCommunityId || targetCommunityId === 'public') {
+      setTargetCommunityRules([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/communities/${targetCommunityId}/rules`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (!cancelled) setTargetCommunityRules(data?.rules || []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [targetCommunityId]);
 
   // Save draft on change
@@ -627,6 +647,23 @@ export default function CreatePage() {
               )}
             </div>
           </div>
+          )}
+
+          {/* House rules of the target community (display only) */}
+          {!challengeCtx && targetCommunityId !== 'public' && targetCommunityRules.length > 0 && (
+            <div className="bg-[#111] border border-[#222] rounded-xl p-4">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                Posting in {myCommunities.find(c => c.id === targetCommunityId)?.name || 'this community'} — house rules
+              </p>
+              <ol className="space-y-1.5">
+                {targetCommunityRules.map((rule, i) => (
+                  <li key={rule.id || i} className="flex gap-2 text-[11px] text-zinc-400 leading-relaxed">
+                    <span className="text-[#ff4d00] font-black font-mono shrink-0">{i + 1}.</span>
+                    <span>{rule.text}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
           )}
 
           {/* Publish Button (photo uses its own composer actions) */}

@@ -12,9 +12,9 @@ import { track } from '@/lib/analytics';
 /**
  * /c/new — Create a Community
  *
- * NAME → DESCRIPTION → TOPIC → CREATE
- * Visibility stays Public in v1 (only fully-enforced options are exposed).
- * The creator automatically becomes the Owner.
+ * NAME → DESCRIPTION → TOPIC → VISIBILITY → CREATE
+ * Every user can create communities. The founding user becomes the Owner
+ * (a management role on a normal USER account — no Creator identity).
  */
 
 export default function CreateCommunityPage() {
@@ -23,6 +23,7 @@ export default function CreateCommunityPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [topicSlug, setTopicSlug] = useState('');
+  const [visibility, setVisibility] = useState('public');
   const [topics, setTopics] = useState([]);
   const [slugPreview, setSlugPreview] = useState('');
   const [slugAvailable, setSlugAvailable] = useState(null); // null | true | false
@@ -102,6 +103,7 @@ export default function CreateCommunityPage() {
           name: name.trim(),
           description: description.trim(),
           topic_slug: topicSlug || undefined,
+          visibility,
         }),
       });
       const data = await res.json();
@@ -118,7 +120,7 @@ export default function CreateCommunityPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, name, description, topicSlug, slugAvailable, router]);
+  }, [submitting, name, description, topicSlug, visibility, slugAvailable, router]);
 
   const nameValid = name.trim().length >= 3;
   const canSubmit = nameValid && slugAvailable !== false && !submitting;
@@ -233,15 +235,40 @@ export default function CreateCommunityPage() {
             )}
           </div>
 
-          {/* VISIBILITY — public only in v1 (fully enforced modes only) */}
+          {/* VISIBILITY — who can find and join this space */}
           <div className="bg-[#111] border border-[#222] rounded-xl p-4">
-            <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+            <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
               <Tag className="w-3.5 h-3.5" aria-hidden="true" />
               4. Visibility
             </div>
-            <p className="text-xs text-zinc-500 font-mono">
-              🌐 Public — anyone can view, join, and participate.
-            </p>
+            <div className="space-y-2" role="radiogroup" aria-label="Community visibility">
+              {[
+                { key: 'public', icon: '🌐', label: 'Public', desc: 'Anyone can discover, view, join, and participate.' },
+                { key: 'private', icon: '🔒', label: 'Private', desc: 'Viewable with the link. Joining needs your approval.' },
+                { key: 'hidden', icon: '🫥', label: 'Hidden', desc: 'Invisible in search and discovery. Members only.' },
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={visibility === opt.key}
+                  onClick={() => setVisibility(opt.key)}
+                  className={`w-full flex items-start gap-3 text-left px-3 py-2.5 rounded-xl border transition-all min-h-[52px] ${
+                    visibility === opt.key
+                      ? 'bg-[#ff4d00]/10 border-[#ff4d00]/50'
+                      : 'bg-[#0a0a0a] border-[#222] hover:border-[#333]'
+                  }`}
+                >
+                  <span className="text-base shrink-0" aria-hidden="true">{opt.icon}</span>
+                  <span className="min-w-0">
+                    <span className={`block text-xs font-bold ${visibility === opt.key ? 'text-white' : 'text-zinc-300'}`}>
+                      {opt.label}
+                    </span>
+                    <span className="block text-[10px] font-mono text-zinc-500 mt-0.5">{opt.desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

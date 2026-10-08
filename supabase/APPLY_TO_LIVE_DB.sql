@@ -20,7 +20,7 @@
 -- EXISTS, guarded policies and publication membership. The script runs as
 -- a single transaction, so a failure rolls the whole thing back.
 --
--- Generated: 2026-10-07
+-- Generated: 2026-10-08
 -- ============================================================
 
 -- ────────────────────────────────────────────────────────────
@@ -9571,3 +9571,235 @@ grant execute on function request_creator_payout(uuid, int, text) to authenticat
 -- ═══════════════════════════════════════════════════════════
 -- DONE — Creator payout request added (additive only)
 -- ═══════════════════════════════════════════════════════════
+
+-- ────────────────────────────────────────────────────────────
+-- FILE: migrations/2026_10_08_community_types.sql
+-- ────────────────────────────────────────────────────────────
+
+-- ═══════════════════════════════════════════════════════════
+-- BURNBOARD Communities — types, approvals, suspension (additive only)
+--
+--   1. communities.visibility gains 'hidden' (public | private | hidden).
+--      Hidden communities are invisible to non-members: RLS already gates
+--      reads to (visibility = 'public' OR member), and every discovery
+--      query filters visibility = 'public', so hidden rows never surface.
+--   2. community_members.membership_status gains 'pending' for private
+--      community join requests (approve → active, deny → row deleted).
+--   3. RPC community_suspend_member() lets active owner/admin/moderator
+--      suspend or unsuspend a member (never owners). Suspended members
+--      keep their row so re-join is blocked; only owners can unsuspend
+--      via the same RPC (moderators suspend, owners unsuspend or remove).
+--      Actually: moderators AND owners may suspend/unsuspend — the RPC
+--      validates the actor is an active owner/admin/moderator.
+--   4. reports.target_type gains 'community' so communities are reportable
+--      through the existing structured safety-report pipeline.
+--   5. moderation_actions audit gains community membership action types.
+-- ═══════════════════════════════════════════════════════════
+
+-- ── 1. visibility CHECK → public | private | hidden ──────────
+DO $$ DECLARE cname text; BEGIN
+  SELECT conname INTO cname FROM pg_constraint
+    WHERE conrelid = 'communities'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%visibility%';
+  IF cname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE communities DROP CONSTRAINT %I', cname);
+  END IF;
+END $$;
+
+ALTER TABLE communities
+  ADD CONSTRAINT communities_visibility_check
+  CHECK (visibility IN ('public', 'private', 'hidden'));
+
+-- ── 2. membership_status CHECK → + pending ───────────────────
+DO $$ DECLARE cname text; BEGIN
+  SELECT conname INTO cname FROM pg_constraint
+    WHERE conrelid = 'community_members'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%membership_status%';
+  IF cname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE community_members DROP CONSTRAINT %I', cname);
+  END IF;
+END $$;
+
+ALTER TABLE community_members
+  ADD CONSTRAINT community_members_status_check
+  CHECK (membership_status IN ('active', 'pending', 'removed', 'suspended'));
+
+CREATE INDEX IF NOT EXISTS idx_community_members_pending
+  ON community_members(community_id, membership_status);
+
+-- ── 3. Suspend / unsuspend RPC (database-enforced roles) ─────
+CREATE OR REPLACE FUNCTION public.community_suspend_member(
+  community uuid,
+  target uuid,
+  suspend boolean
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  actor_role text;
+  target_role text;
+  target_status text;
+BEGIN
+  -- Actor must be an active owner/admin/moderator of this community
+  SELECT role INTO actor_role FROM community_members
+    WHERE community_id = community
+      AND user_id = auth.uid()
+      AND membership_status = 'active';
+
+  IF actor_role IS NULL
+     OR actor_role NOT IN ('owner', 'admin', 'moderator') THEN
+    RETURN false;
+  END IF;
+
+  -- Target must hold a membership row in this community
+  SELECT role, membership_status INTO target_role, target_status
+    FROM community_members
+    WHERE community_id = community
+      AND user_id = target;
+
+  IF target_role IS NULL THEN
+    RETURN false;
+  END IF;
+
+  -- Owners can never be suspended (owner safety)
+  IF target_role = 'owner' THEN
+    RETURN false;
+  END IF;
+
+  IF suspend THEN
+    IF target_status != 'active' THEN
+      RETURN false;
+    END IF;
+    UPDATE community_members SET membership_status = 'suspended'
+      WHERE community_id = community AND user_id = target;
+  ELSE
+    IF target_status != 'suspended' THEN
+      RETURN false;
+    END IF;
+    UPDATE community_members SET membership_status = 'active'
+      WHERE community_id = community AND user_id = target;
+  END IF;
+
+  RETURN true;
+END;
+$$;
+
+-- ── 4. Community report target ───────────────────────────────
+ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_target_type_check;
+ALTER TABLE reports ADD CONSTRAINT reports_target_type_check
+  CHECK (target_type IN (
+    'roast', 'hot_seat', 'battle', 'profile', 'user',
+    'social_post', 'comment', 'challenge', 'community'
+  ));
+
+-- ── 5. Membership moderation audit types ─────────────────────
+ALTER TABLE moderation_actions DROP CONSTRAINT IF EXISTS moderation_actions_action_type_check;
+ALTER TABLE moderation_actions ADD CONSTRAINT moderation_actions_action_type_check
+  CHECK (action_type IN (
+    'hide_roast', 'unhide_roast',
+    'hide_hot_seat', 'unhide_hot_seat',
+    'restrict_profile', 'unrestrict_profile',
+    'ban_profile', 'unban_profile',
+    'dismiss_report', 'resolve_report', 'escalate_report',
+    'resolve_appeal', 'reverse_appeal',
+    'community_remove_post', 'community_remove_member', 'community_role_changed',
+    'community_approve_member', 'community_deny_member',
+    'community_suspend_member', 'community_unsuspend_member'
+  ));
+
+-- ═══════════════════════════════════════════════════════════
+-- DONE — community types + approvals + suspension (additive)
+-- ═══════════════════════════════════════════════════════════
+
+-- ────────────────────────────────────────────────────────────
+-- FILE: migrations/2026_10_08_photo_posts_privacy.sql
+-- ────────────────────────────────────────────────────────────
+
+-- BURNBOARD — Rich photo posts + privacy control (additive only).
+--
+-- Design: drafts/scheduled ride on social_posts.visibility
+-- ('draft' / 'scheduled') + metadata JSON, so NO new post columns are
+-- required and every existing query keeps working. This migration adds:
+--   1. post_saves table (save/unsave any social post)
+--   2. post-media storage bucket + policies (photo uploads)
+--   3. RLS read policies so owners always see their own non-public posts
+--      and followers see followers-only posts (app layer enforces the
+--      same rules as defense-in-depth; without this migration the safe
+--      default is simply that non-public posts don't surface).
+--   4. Realtime publication for post_saves (best-effort).
+
+-- ── 1. post_saves ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS post_saves (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  post_id UUID NOT NULL REFERENCES social_posts(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, post_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_saves_user ON post_saves(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_post_saves_post ON post_saves(post_id);
+
+ALTER TABLE post_saves ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users read own saves" ON post_saves;
+CREATE POLICY "Users read own saves" ON post_saves
+  FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users save posts" ON post_saves;
+CREATE POLICY "Users save posts" ON post_saves
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users unsave posts" ON post_saves;
+CREATE POLICY "Users unsave posts" ON post_saves
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- ── 2. post-media storage bucket ──────────────────────────────
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('post-media', 'post-media', true)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Public read post media" ON storage.objects;
+CREATE POLICY "Public read post media" ON storage.objects
+  FOR SELECT USING (bucket_id = 'post-media');
+
+DROP POLICY IF EXISTS "Auth upload post media" ON storage.objects;
+CREATE POLICY "Auth upload post media" ON storage.objects
+  FOR INSERT WITH CHECK (
+    bucket_id = 'post-media'
+    AND auth.role() = 'authenticated'
+  );
+
+DROP POLICY IF EXISTS "Owner delete post media" ON storage.objects;
+CREATE POLICY "Owner delete post media" ON storage.objects
+  FOR DELETE USING (
+    bucket_id = 'post-media'
+    AND auth.uid() = owner
+  );
+
+-- ── 3. Non-public post reads (additive; existing policies untouched) ──
+DROP POLICY IF EXISTS "Owners read own posts" ON social_posts;
+CREATE POLICY "Owners read own posts" ON social_posts
+  FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Followers read followers posts" ON social_posts;
+CREATE POLICY "Followers read followers posts" ON social_posts
+  FOR SELECT USING (
+    visibility = 'followers'
+    AND moderation_state = 'visible'
+    AND EXISTS (
+      SELECT 1 FROM follows
+      WHERE follows.follower_id = auth.uid()
+        AND follows.following_id = social_posts.user_id
+    )
+  );
+
+-- ── 4. Realtime (best-effort) ─────────────────────────────────
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE post_saves;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;

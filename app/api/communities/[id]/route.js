@@ -11,7 +11,8 @@ import {
  *   viewer membership state, permission flags, recent activity count.
  *
  * PATCH /api/communities/[id]
- *   Owner-only updates: name, description, avatar_url, cover_url, topic_slug.
+ *   Owner-only updates: name, description, avatar_url, cover_url,
+ *   visibility (public | private | hidden), topic_slug.
  *   Slugs are stable and never change (stable URLs preserved).
  *
  * DELETE /api/communities/[id]
@@ -74,11 +75,23 @@ export async function GET(req, { params }) {
     const isModerator = canModerate(membership?.role);
     const isMember = !!membership && membership.membership_status === 'active';
 
+    // Owners see how many join requests await review (private communities).
+    let pendingCount = 0;
+    if (isOwner) {
+      const { count } = await client
+        .from('community_members')
+        .select('id', { count: 'exact', head: true })
+        .eq('community_id', community.id)
+        .eq('membership_status', 'pending');
+      pendingCount = count || 0;
+    }
+
     return NextResponse.json({
       community: {
         ...community,
         member_count: counts[community.id] || 0,
         activity_count: activityResult.count || 0,
+        pending_count: pendingCount,
         creator: creator ? { username: creator.username, displayName: creator.display_name } : null,
       },
       topics,
@@ -148,6 +161,13 @@ export async function PATCH(req, { params }) {
 
     if (body.cover_url !== undefined) {
       updates.cover_url = body.cover_url ? String(body.cover_url) : null;
+    }
+
+    if (body.visibility !== undefined) {
+      if (!['public', 'private', 'hidden'].includes(body.visibility)) {
+        return NextResponse.json({ error: 'Visibility must be public, private, or hidden' }, { status: 400 });
+      }
+      updates.visibility = body.visibility;
     }
 
     if (Object.keys(updates).length > 0) {

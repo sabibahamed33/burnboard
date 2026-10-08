@@ -38,7 +38,7 @@ const FILTERS = [
   { key: 'comments', label: 'Comments', types: ['comment', 'reply'] },
   { key: 'mentions', label: 'Mentions', types: ['mention'] },
   { key: 'battles', label: 'Battles', types: ['battle_invite', 'battle_ready', 'battle_result'] },
-  { key: 'communities', label: 'Communities', types: ['community_joined', 'community_role_changed'] },
+  { key: 'communities', label: 'Communities', types: ['community_joined', 'community_role_changed', 'community_join_request', 'community_join_approved'] },
   { key: 'challenges', label: 'Challenges', types: ['challenge_invite', 'challenge_result'] },
 ];
 

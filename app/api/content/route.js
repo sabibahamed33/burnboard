@@ -254,13 +254,12 @@ export async function POST(req) {
       if (!community || community.status !== 'active') {
         return NextResponse.json({ error: 'Community not found' }, { status: 404 });
       }
-      if (community.visibility !== 'public') {
-        return NextResponse.json(
-          { error: 'This community does not allow posting' },
-          { status: 403 }
-        );
-      }
-
+      // Hidden communities accept posts only from active members (the
+      // community itself is undiscoverable, so this path needs a direct
+      // membership, e.g. via the member's own community list).
+      // Public and private communities accept posts from active members;
+      // private posting additionally requires an approved membership, which
+      // the active-status check below enforces.
       const { data: membership } = await contextClient
         .from('community_members')
         .select('id')

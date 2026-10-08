@@ -5,20 +5,27 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft, Users, Loader2, Plus, Flame, Shield, BookOpen, UserCog, X,
-  Trash2, Check, UserMinus, UserX
+  Trash2, Check, UserMinus, UserX, Lock, EyeOff, Image as ImageIcon,
+  TrendingUp, Info, Flag, BellOff, Bell, Clock, CheckCircle
 } from 'lucide-react';
 import { FeedCard } from '@/components/feed';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { JoinButton } from '@/components/communities';
+import ReportModal from '@/components/safety/ReportModal';
 import Avatar from '@/components/ui/Avatar';
 import { track } from '@/lib/analytics';
+import { isCommunityMuted, setCommunityMuted } from '@/lib/communityMute';
 
 /**
  * /c/:slug — Community Home
  *
- * Discover → See content → Participate.
+ * Discover → See content → Join → Participate → Follow users.
  * Real data only: real membership, real member counts, real community feed
  * (canonical social_posts with the community as context).
+ *
+ * Privacy: public communities are fully visible; private communities show a
+ * preview with request-to-join for outsiders; hidden communities 404 for
+ * non-members (the API never reveals their existence).
  */
 
 const COLORS = [
@@ -82,7 +89,8 @@ export default function CommunityPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Feed state
+  // Feed state (+ tabs: latest | top | media | about)
+  const [tab, setTab] = useState('feed');
   const [items, setItems] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(true);
@@ -90,9 +98,11 @@ export default function CommunityPage() {
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const loadMoreRef = useRef(null);
 
-  // Modals
+  // Modals + local preferences
   const [showMembers, setShowMembers] = useState(false);
   const [showRulesEditor, setShowRulesEditor] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [muted, setMuted] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     try {
@@ -109,6 +119,7 @@ export default function CommunityPage() {
       setTopics(data.topics || []);
       setRules(data.rules || []);
       setLoading(false);
+      setMuted(isCommunityMuted(data.community?.id));
       track('community_viewed', { communityId: data.community.id });
     } catch {
       setError('Failed to load community');
@@ -116,8 +127,10 @@ export default function CommunityPage() {
     }
   }, [slug]);
 
-  const fetchFeed = useCallback(async (refresh = false) => {
+  const fetchFeed = useCallback(async (refresh = false, activeTab = tab) => {
     if (!community?.id) return;
+    // About is informational — no feed fetch.
+    if (activeTab === 'about') return;
     try {
       if (refresh) {
         setFeedLoading(true);
@@ -130,6 +143,8 @@ export default function CommunityPage() {
 
       const paramsObj = new URLSearchParams({ limit: '20' });
       if (cursor && !refresh) paramsObj.set('cursor', cursor);
+      if (activeTab === 'top') paramsObj.set('sort', 'top');
+      if (activeTab === 'media') paramsObj.set('media', '1');
 
       const res = await fetch(`/api/communities/${community.id}/feed?${paramsObj}`);
       const data = await res.json();
@@ -148,7 +163,7 @@ export default function CommunityPage() {
       setFeedLoading(false);
       setFeedLoadingMore(false);
     }
-  }, [community?.id, cursor]);
+  }, [community?.id, cursor, tab]);
 
   // Initial load
   useEffect(() => {
@@ -176,13 +191,34 @@ export default function CommunityPage() {
     return () => observer.disconnect();
   }, [hasMore, feedLoading, feedLoadingMore, fetchFeed]);
 
-  const handleJoinChange = useCallback((isMember, memberCount) => {
-    setViewer(prev => ({ ...prev, isMember }));
+  const handleJoinChange = useCallback((isMember, memberCount, pending) => {
+    setViewer(prev => ({ ...prev, isMember, membershipStatus: pending ? 'pending' : isMember ? 'active' : null }));
     setCommunity(prev => (prev ? { ...prev, member_count: memberCount } : prev));
     if (isMember) {
       setPermissions(prev => ({ ...prev, canPost: true }));
+      // New members land on the live feed.
+      fetchFeed(true, 'feed');
+      setTab('feed');
     }
-  }, []);
+  }, [fetchFeed]);
+
+  const switchTab = useCallback((next) => {
+    setTab(next);
+    if (next !== 'about') {
+      setCursor(null);
+      fetchFeed(true, next);
+    }
+  }, [fetchFeed]);
+
+  const toggleMute = useCallback(() => {
+    if (!community?.id) return;
+    setMuted(prev => {
+      const next = !prev;
+      setCommunityMuted(community.id, next);
+      track(next ? 'community_muted' : 'community_unmuted', { communityId: community.id });
+      return next;
+    });
+  }, [community?.id]);
 
   const handleRemoveFromCommunity = useCallback(async (item) => {
     if (!community?.id) return;
@@ -244,7 +280,17 @@ export default function CommunityPage() {
   const isMember = viewer?.isMember;
   const isOwner = viewer?.isOwner;
   const isModerator = viewer?.isModerator;
+  const isPending = viewer?.membershipStatus === 'pending';
+  const visibility = community?.visibility || 'public';
+  const isPrivateOutsider = visibility === 'private' && !isMember;
   const communityColor = getColorFromName(community.name);
+
+  const TABS = [
+    { key: 'feed', label: 'Feed', icon: Flame },
+    { key: 'top', label: 'Top', icon: TrendingUp },
+    { key: 'media', label: 'Media', icon: ImageIcon },
+    { key: 'about', label: 'About', icon: Info },
+  ];
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
@@ -332,7 +378,9 @@ export default function CommunityPage() {
                   )}
                   <JoinButton
                     communityId={community.id}
+                    visibility={visibility}
                     initialIsMember={isMember}
+                    initialPending={isPending}
                     initialMemberCount={community.member_count || 0}
                     isOwner={isOwner}
                     onStateChange={handleJoinChange}
@@ -345,8 +393,37 @@ export default function CommunityPage() {
                 <p className="text-sm text-zinc-300 leading-relaxed">{community.description}</p>
               )}
 
+              {/* Pending notice for requested users */}
+              {isPending && (
+                <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2.5 text-xs text-amber-300">
+                  <Clock className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>Request sent — the owner will review it soon. You can withdraw it anytime.</span>
+                </div>
+              )}
+
               {/* Meta chips */}
               <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono">
+                <span
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border ${
+                    visibility === 'public'
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : visibility === 'private'
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                        : 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400'
+                  }`}
+                  title={
+                    visibility === 'public'
+                      ? 'Anyone can discover and join'
+                      : visibility === 'private'
+                        ? 'Joining needs owner approval'
+                        : 'Invite-only, hidden from discovery'
+                  }
+                >
+                  {visibility === 'public' ? null : visibility === 'private'
+                    ? <Lock className="w-3 h-3" aria-hidden="true" />
+                    : <EyeOff className="w-3 h-3" aria-hidden="true" />}
+                  {visibility === 'public' ? '🌐 Public' : visibility === 'private' ? 'Private' : 'Hidden'}
+                </span>
                 {(isOwner || isModerator) && (
                   <button
                     onClick={() => setShowRulesEditor(true)}
@@ -363,6 +440,28 @@ export default function CommunityPage() {
                   <Users className="w-3 h-3" aria-hidden="true" />
                   Members
                 </button>
+                <button
+                  onClick={toggleMute}
+                  aria-pressed={muted}
+                  title={muted ? 'Unmute this community' : 'Mute this community (hides it from discovery)'}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border transition-all ${
+                    muted
+                      ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
+                      : 'bg-[#1a1a1a] border-[#333] text-zinc-300 hover:border-[#ff4d00]/40 hover:text-white'
+                  }`}
+                >
+                  {muted ? <BellOff className="w-3 h-3" aria-hidden="true" /> : <Bell className="w-3 h-3" aria-hidden="true" />}
+                  {muted ? 'Muted' : 'Mute'}
+                </button>
+                {!isOwner && (
+                  <button
+                    onClick={() => setShowReport(true)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#1a1a1a] border border-[#333] text-zinc-300 hover:border-red-500/50 hover:text-red-400 transition-all"
+                  >
+                    <Flag className="w-3 h-3" aria-hidden="true" />
+                    Report
+                  </button>
+                )}
                 {isModerator && !isOwner && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
                     <Shield className="w-3 h-3" aria-hidden="true" />
@@ -379,22 +478,137 @@ export default function CommunityPage() {
             </div>
           </header>
 
-          {/* ═══ Feed ═══ */}
-          {feedLoading ? (
+          {/* ═══ Tabs ═══ */}
+          {!isPrivateOutsider && (
+            <div className="flex items-center gap-1 bg-[#111] p-1 rounded-xl border border-[#222] overflow-x-auto" role="tablist" aria-label="Community sections">
+              {TABS.map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  role="tab"
+                  aria-selected={tab === key}
+                  onClick={() => switchTab(key)}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-xs font-mono font-bold whitespace-nowrap transition-all flex-1 justify-center min-h-[44px] ${
+                    tab === key ? 'bg-[#ff4d00] text-black' : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ═══ Private preview gate ═══ */}
+          {isPrivateOutsider ? (
+            <div className="bg-[#111] border border-[#222] rounded-2xl p-8 text-center space-y-4">
+              <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+                <Lock className="w-5 h-5 text-amber-400" aria-hidden="true" />
+              </div>
+              <h2 className="text-base font-black text-white uppercase tracking-wider">Private community</h2>
+              <p className="text-xs text-zinc-400 max-w-sm mx-auto leading-relaxed">
+                {community.member_count || 0} members share posts here. Request to join and the owner will review it.
+              </p>
+              {rules.length > 0 && (
+                <div className="text-left bg-[#0a0a0a] border border-[#222] rounded-xl p-4 max-w-sm mx-auto">
+                  <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                    House rules (read before requesting)
+                  </p>
+                  <ol className="space-y-1.5">
+                    {rules.map((rule, i) => (
+                      <li key={rule.id} className="flex gap-2 text-xs text-zinc-300 leading-relaxed">
+                        <span className="text-[#ff4d00] font-black font-mono shrink-0">{i + 1}.</span>
+                        <span>{rule.text}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+              <JoinButton
+                communityId={community.id}
+                visibility={visibility}
+                initialIsMember={false}
+                initialPending={isPending}
+                initialMemberCount={community.member_count || 0}
+                onStateChange={handleJoinChange}
+                size="lg"
+              />
+            </div>
+          ) : tab === 'about' ? (
+            /* ═══ About ═══ */
+            <div className="space-y-4">
+              <div className="bg-[#111] border border-[#222] rounded-2xl p-5 space-y-3">
+                <h2 className="text-sm font-black text-white uppercase tracking-wider">About</h2>
+                {community.description ? (
+                  <p className="text-sm text-zinc-300 leading-relaxed">{community.description}</p>
+                ) : (
+                  <p className="text-xs text-zinc-500 font-mono">No description yet.</p>
+                )}
+                <div className="flex items-center gap-4 text-[11px] font-mono text-zinc-500 flex-wrap pt-1">
+                  <span><span className="font-bold text-zinc-300">{formatCount(community.member_count || 0)}</span> members</span>
+                  <span>Created {timeAgo(community.created_at)}</span>
+                  {community.creator?.username && <span>Founded by @{community.creator.username}</span>}
+                </div>
+                {topics.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {topics.map(t => (
+                      <Link
+                        key={t.slug}
+                        href={`/c?q=${encodeURIComponent(t.name)}`}
+                        className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-[#1a1a1a] border border-[#2a2a2a] text-zinc-300 hover:border-[#ff4d00]/40 hover:text-white transition-all"
+                      >
+                        {t.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="bg-[#111] border border-[#222] rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-[#ff4d00]" aria-hidden="true" />
+                    Rules
+                  </h2>
+                  {isModerator && (
+                    <button
+                      onClick={() => setShowRulesEditor(true)}
+                      className="text-[10px] font-mono text-[#ff4d00] hover:text-white transition-colors"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {rules.length === 0 ? (
+                  <p className="text-xs text-zinc-500 font-mono">No rules yet.</p>
+                ) : (
+                  <ol className="space-y-2.5">
+                    {rules.map((rule, i) => (
+                      <li key={rule.id} className="flex gap-2.5 text-xs text-zinc-300 leading-relaxed">
+                        <span className="text-[#ff4d00] font-black font-mono shrink-0">{i + 1}.</span>
+                        <span>{rule.text}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </div>
+          ) : /* ═══ Feed / Top / Media ═══ */
+          feedLoading ? (
             <div className="space-y-4">
               {[...Array(3)].map((_, i) => <CardSkeleton key={i} />)}
             </div>
           ) : items.length === 0 ? (
             /* Honest empty state — never fake starter posts */
             <div className="bg-[#111] border border-dashed border-[#333] rounded-2xl p-10 text-center space-y-4">
-              <div className="text-5xl">🕳️</div>
+              <div className="text-5xl">{tab === 'media' ? '🖼️' : '🕳️'}</div>
               <h2 className="text-lg font-black text-white uppercase tracking-wider">
-                THIS SPACE IS NEW
+                {tab === 'media' ? 'NO PHOTOS YET' : tab === 'top' ? 'NOTHING RANKED YET' : 'THIS SPACE IS NEW'}
               </h2>
               <p className="text-xs text-zinc-400 max-w-sm mx-auto">
-                {isMember
-                  ? 'No conversations yet. Start the first one.'
-                  : 'This space is new. Join and start the conversation.'}
+                {tab === 'media'
+                  ? 'Photo posts shared here will appear in this gallery.'
+                  : isMember
+                    ? 'No conversations yet. Start the first one.'
+                    : 'This space is new. Join and start the conversation.'}
               </p>
               {isMember && permissions?.canPost ? (
                 <Link
@@ -405,10 +619,12 @@ export default function CommunityPage() {
                   Start the conversation
                 </Link>
               ) : (
-                !isMember && (
+                !isMember && !isPending && (
                   <JoinButton
                     communityId={community.id}
+                    visibility={visibility}
                     initialIsMember={false}
+                    initialPending={false}
                     initialMemberCount={community.member_count || 0}
                     onStateChange={handleJoinChange}
                     size="lg"
@@ -417,19 +633,31 @@ export default function CommunityPage() {
               )}
             </div>
           ) : (
-            <div className="space-y-4">
-              {items.map(item => (
-                <FeedCard
-                  key={item.id}
-                  item={item}
-                  onRemoveFromCommunity={isModerator ? handleRemoveFromCommunity : null}
-                />
-              ))}
+            <div className={tab === 'media' ? 'grid grid-cols-2 sm:grid-cols-3 gap-2' : 'space-y-4'}>
+              {tab === 'media'
+                ? items.filter(i => i.mediaUrl).map(item => (
+                    <Link key={item.id} href={`/post/${item.id}`} className="group relative rounded-xl overflow-hidden border border-[#222] aspect-square bg-[#111]">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={item.mediaUrl}
+                        alt=""
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </Link>
+                  ))
+                : items.map(item => (
+                    <FeedCard
+                      key={item.id}
+                      item={item}
+                      onRemoveFromCommunity={isModerator ? handleRemoveFromCommunity : null}
+                    />
+                  ))}
             </div>
           )}
 
-          {/* Load more */}
-          {hasMore && !feedLoading && (
+          {/* Load more (chronological tabs only — Top is a snapshot) */}
+          {!isPrivateOutsider && tab !== 'about' && tab !== 'top' && hasMore && !feedLoading && (
             <div ref={loadMoreRef} className="py-8 flex justify-center">
               {feedLoadingMore && (
                 <div className="flex items-center gap-2 text-zinc-400">
@@ -440,7 +668,7 @@ export default function CommunityPage() {
             </div>
           )}
 
-          {!hasMore && !feedLoading && items.length > 0 && (
+          {!isPrivateOutsider && tab !== 'about' && !hasMore && !feedLoading && items.length > 0 && (
             <div className="text-center py-8 border-t border-[#222]">
               <p className="text-xs text-zinc-500 font-mono">
                 🔥 You&apos;ve reached the start of this community.
@@ -526,13 +754,24 @@ export default function CommunityPage() {
           onSaved={setRules}
         />
       )}
+
+      {/* ═══ Report Community Modal ═══ */}
+      {showReport && (
+        <ReportModal
+          targetType="community"
+          targetId={community.id}
+          onClose={() => setShowReport(false)}
+        />
+      )}
     </div>
   );
 }
 
 /**
  * MembersModal — real paginated member directory with role info.
- * Owner sees role management; moderators see member removal (community-scoped).
+ * Owners review join requests and manage roles; moderators remove or
+ * suspend members (community-scoped). Suspended members are listed
+ * separately for moderators so bans can be lifted.
  */
 function MembersModal({ community, viewer, onClose, onOpen }) {
   const [members, setMembers] = useState([]);
@@ -541,7 +780,14 @@ function MembersModal({ community, viewer, onClose, onOpen }) {
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState('');
+  const [pending, setPending] = useState([]);
+  const [pendingTotal, setPendingTotal] = useState(0);
+  const [suspended, setSuspended] = useState([]);
+  const [showSuspended, setShowSuspended] = useState(false);
   const PAGE_SIZE = 24;
+
+  const canManage = viewer?.isOwner;
+  const canModerate = viewer?.isModerator;
 
   const loadMembers = useCallback(async (pageNum) => {
     setLoading(true);
@@ -553,6 +799,10 @@ function MembersModal({ community, viewer, onClose, onOpen }) {
       if (res.ok) {
         setMembers(data.members || []);
         setTotal(data.total || 0);
+        if (data.pending) {
+          setPending(data.pending.requests || []);
+          setPendingTotal(data.pending.total || 0);
+        }
       }
     } catch {
       setError('Failed to load members');
@@ -561,8 +811,17 @@ function MembersModal({ community, viewer, onClose, onOpen }) {
     }
   }, [community.id]);
 
+  const loadSuspended = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/communities/${community.id}/members?status=suspended&limit=50`);
+      const data = await res.json();
+      if (res.ok) setSuspended(data.members || []);
+    } catch {}
+  }, [community.id]);
+
   useEffect(() => {
     loadMembers(0);
+    if (canModerate) loadSuspended();
     onOpen?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadMembers]);
@@ -613,8 +872,57 @@ function MembersModal({ community, viewer, onClose, onOpen }) {
     }
   }, [community.id, community.name]);
 
-  const canManage = viewer?.isOwner;
-  const canModerate = viewer?.isModerator;
+  const handleReview = useCallback(async (request, approve) => {
+    setBusyId(request.id);
+    setError('');
+    try {
+      const res = await fetch(`/api/communities/${community.id}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: approve ? 'approve' : 'deny', user_id: request.id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPending(prev => prev.filter(r => r.id !== request.id));
+        setPendingTotal(t => Math.max(0, t - 1));
+        if (approve) loadMembers(0);
+      } else {
+        setError(data.error || 'Failed to review request');
+      }
+    } catch {
+      setError('Failed to review request');
+    } finally {
+      setBusyId(null);
+    }
+  }, [community.id, loadMembers]);
+
+  const handleSuspend = useCallback(async (member, suspend) => {
+    if (suspend && !window.confirm(`Suspend @${member.username}? They lose access but can be unsuspended later.`)) return;
+    setBusyId(member.id);
+    setError('');
+    try {
+      const res = await fetch(`/api/communities/${community.id}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: suspend ? 'suspend' : 'unsuspend', user_id: member.id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (suspend) {
+          setMembers(prev => prev.filter(m => m.id !== member.id));
+          setTotal(t => Math.max(0, t - 1));
+        }
+        loadSuspended();
+      } else {
+        setError(data.error || 'Failed to update suspension');
+      }
+    } catch {
+      setError('Failed to update suspension');
+    } finally {
+      setBusyId(null);
+    }
+  }, [community.id, loadSuspended]);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -637,6 +945,46 @@ function MembersModal({ community, viewer, onClose, onOpen }) {
         )}
 
         <div className="overflow-y-auto max-h-[60vh] p-2">
+          {/* Pending join requests (owners review for private communities) */}
+          {canManage && pending.length > 0 && (
+            <div className="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-2">
+              <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-400 px-2 py-1">
+                Requests ({pendingTotal})
+              </p>
+              {pending.map(req => (
+                <div key={req.id} className="flex items-center gap-3 p-2 rounded-xl">
+                  <Link href={`/u/${req.username}`} className="flex items-center gap-3 flex-1 min-w-0">
+                    <Avatar username={req.username} size="md" src={req.avatarUrl} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-white truncate">@{req.username}</p>
+                      {req.displayName && (
+                        <p className="text-[11px] text-zinc-400 truncate">{req.displayName}</p>
+                      )}
+                    </div>
+                  </Link>
+                  <button
+                    onClick={() => handleReview(req, true)}
+                    disabled={busyId === req.id}
+                    aria-label={`Approve @${req.username}`}
+                    title="Approve"
+                    className="p-2 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                  >
+                    {busyId === req.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  </button>
+                  <button
+                    onClick={() => handleReview(req, false)}
+                    disabled={busyId === req.id}
+                    aria-label={`Decline @${req.username}`}
+                    title="Decline"
+                    className="p-2 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {loading && page === 0 ? (
             <div className="space-y-2 p-4">
               {[...Array(5)].map((_, i) => (
@@ -710,6 +1058,19 @@ function MembersModal({ community, viewer, onClose, onOpen }) {
                     </div>
                   )}
 
+                  {/* Moderator can suspend non-owners */}
+                  {canModerate && member.role !== 'owner' && member.id !== viewer?.userId && (
+                    <button
+                      onClick={() => handleSuspend(member, true)}
+                      disabled={busyId === member.id}
+                      className="p-1.5 rounded-lg text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                      aria-label={`Suspend @${member.username}`}
+                      title="Suspend (temporary ban — reversible)"
+                    >
+                      {busyId === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserX className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
+
                   {/* Moderator can remove non-owners */}
                   {canModerate && member.role !== 'owner' && member.id !== viewer?.userId && (
                     <button
@@ -719,7 +1080,7 @@ function MembersModal({ community, viewer, onClose, onOpen }) {
                       aria-label={`Remove @${member.username} from community`}
                       title="Remove from community"
                     >
-                      {busyId === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserX className="w-3.5 h-3.5" />}
+                      {busyId === member.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                     </button>
                   )}
                 </div>
@@ -727,6 +1088,43 @@ function MembersModal({ community, viewer, onClose, onOpen }) {
             </div>
           )}
         </div>
+
+        {/* Suspended review (moderators+ only) */}
+        {canModerate && (
+          <div className="border-t border-[#222]">
+            <button
+              onClick={() => setShowSuspended(v => !v)}
+              aria-expanded={showSuspended}
+              className="w-full flex items-center justify-between px-4 py-2.5 text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-500 hover:text-white transition-colors"
+            >
+              <span>Suspended ({suspended.length})</span>
+              <span>{showSuspended ? '−' : '+'}</span>
+            </button>
+            {showSuspended && (
+              <div className="px-2 pb-2">
+                {suspended.length === 0 ? (
+                  <p className="text-[11px] font-mono text-zinc-600 px-2 py-2">No suspended members.</p>
+                ) : (
+                  suspended.map(s => (
+                    <div key={s.id} className="flex items-center gap-3 p-2 rounded-xl hover:bg-[#1a1a1a]">
+                      <Link href={`/u/${s.username}`} className="flex items-center gap-3 flex-1 min-w-0">
+                        <Avatar username={s.username} size="md" src={s.avatarUrl} />
+                        <p className="text-sm font-bold text-zinc-300 truncate">@{s.username}</p>
+                      </Link>
+                      <button
+                        onClick={() => handleSuspend(s, false)}
+                        disabled={busyId === s.id}
+                        className="px-3 py-1.5 text-[10px] font-mono font-bold rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-all disabled:opacity-40"
+                      >
+                        {busyId === s.id ? '…' : 'Unsuspend'}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Pagination */}
         {totalPages > 1 && (

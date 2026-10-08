@@ -14,8 +14,12 @@ import { checkRateLimit, ipKey, RATE_LIMITS, getClientIp } from '@/lib/serverRat
  *
  * POST /api/communities
  *   Create a community. Requires authentication. Rate-limited.
- *   Body: { name, description?, topic_slug?, avatar_url? }
- *   The creator automatically becomes the Owner.
+ *   Body: { name, description?, topic_slug?, avatar_url?, visibility? }
+ *   visibility: 'public' | 'private' | 'hidden' (default 'public').
+ *   Private: discoverable by link, join requires approval.
+ *   Hidden: invisible in search/discovery, members-only access.
+ *   The founding user automatically becomes the Owner (a USER with a
+ *   management role — there is no separate Creator account type).
  */
 
 export async function GET(req) {
@@ -103,7 +107,7 @@ export async function POST(req) {
     }
 
     const body = await req.json();
-    const { name, description, topic_slug, avatar_url } = body;
+    const { name, description, topic_slug, avatar_url, visibility } = body;
 
     // ── Validation ──────────────────────────────────────────
     if (!name || typeof name !== 'string' || name.trim().length < 3 || name.trim().length > 60) {
@@ -136,6 +140,10 @@ export async function POST(req) {
 
     const cleanDescription = typeof description === 'string' ? description.trim().slice(0, 300) : '';
 
+    const cleanVisibility = ['public', 'private', 'hidden'].includes(visibility)
+      ? visibility
+      : 'public';
+
     // Duplicate prevention (unique slug)
     const { data: existing } = await client
       .from('communities')
@@ -157,7 +165,7 @@ export async function POST(req) {
         slug,
         description: cleanDescription,
         avatar_url: avatar_url || null,
-        visibility: 'public', // v1 supports public communities only
+        visibility: cleanVisibility,
         creator_id: userId,
       })
       .select()
@@ -171,7 +179,8 @@ export async function POST(req) {
       );
     }
 
-    // Creator becomes Owner (real membership row)
+    // The founding user becomes Owner (real membership row — a management
+    // role on a normal USER account, not a separate account type)
     const { error: memberError } = await client
       .from('community_members')
       .insert({
