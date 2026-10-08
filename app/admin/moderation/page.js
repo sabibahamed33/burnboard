@@ -68,6 +68,7 @@ export default function AdminModerationPage() {
   };
 
   const contentAct = async (report, action) => {
+    if (action === 'hide_content' && !window.confirm('Remove this content from public view? It can be restored later.')) return;
     setBusy(`${action}-${report.id}`);
     try {
       const res = await fetch('/api/safety/moderation', {
@@ -102,6 +103,7 @@ export default function AdminModerationPage() {
   const runEnforcement = async () => {
     setEnforceMsg('');
     if (!enforce.userId.trim() || !enforce.reason.trim()) { setEnforceMsg('User ID and reason are required.'); return; }
+    if (['suspend', 'ban'].includes(enforce.action) && !window.confirm(`${enforce.action === 'ban' ? 'Ban' : 'Suspend'} this user? The user will be notified with an appeal path.`)) return;
     setBusy('enforce');
     try {
       const res = await fetch('/api/safety/enforcement', {

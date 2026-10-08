@@ -88,7 +88,7 @@ export async function POST(req, { params }) {
     if (seatError || !hotSeat) {
       if (isMissingTableError(seatError)) {
         return NextResponse.json(
-          { error: 'Database tables not set up yet. Run supabase/bootstrap.sql in the Supabase SQL Editor, then try again.', code: seatError.code },
+          { error: 'Something went wrong. Please try again.' },
           { status: 503 }
         );
       }

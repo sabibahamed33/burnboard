@@ -159,7 +159,7 @@ export async function POST(req) {
               challenge_completed: !!challenge_token,
             },
             _fallback: true,
-            _warning: 'Database tables not set up yet — using temporary local storage. Run supabase/bootstrap.sql in Supabase SQL Editor for persistence.',
+            _warning: 'Using temporary local storage.',
           });
         }
 
@@ -230,8 +230,7 @@ export async function POST(req) {
     if (isMissingTableError(err)) {
       return NextResponse.json(
         {
-          error: 'Database tables not set up yet. Run supabase/bootstrap.sql in the Supabase SQL Editor, then try again.',
-          code: err.code || 'PGRST205',
+          error: 'Something went wrong. Please try again.',
         },
         { status: 503 }
       );

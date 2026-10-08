@@ -134,8 +134,32 @@ export default function AdminPage() {
     a.click();
   };
 
+  // Staff-session proof for destructive writes: probes the moderator-gated
+  // queue (403 unless the signed-in session is safety staff). The client
+  // password flag alone never authorizes destruction.
+  const verifyStaffSession = async () => {
+    try {
+      const res = await fetch('/api/safety/moderation?status=open&limit=1', { cache: 'no-store' });
+      if (res.status === 401) {
+        alert('Sign in with your staff account first.');
+        return false;
+      }
+      if (res.status === 403) {
+        alert('Staff permissions required for this action.');
+        return false;
+      }
+      return res.ok;
+    } catch {
+      alert('Could not verify staff session. Try again.');
+      return false;
+    }
+  };
+
   const handleDeleteRoast = async (id) => {
     if (!confirm('Delete this roast permanently?')) return;
+    // Server-verified staff session first: the password flag alone never
+    // authorizes destruction (RLS remains the database backstop).
+    if (!(await verifyStaffSession())) return;
     if (isSupabaseConfigured && supabase) {
       await supabase.from('roasts').delete().eq('id', id);
     }
@@ -145,6 +169,7 @@ export default function AdminPage() {
 
   const handleDeleteProfile = async (id) => {
     if (!confirm('Delete this profile AND all its roasts permanently?')) return;
+    if (!(await verifyStaffSession())) return;
     if (isSupabaseConfigured && supabase) {
       await supabase.from('roasts').delete().eq('profile_id', id);
       await supabase.from('profiles').delete().eq('id', id);
@@ -155,6 +180,7 @@ export default function AdminPage() {
 
   const handleToggleFeature = async (id, currentFeatured) => {
     const nextVal = !currentFeatured;
+    if (!(await verifyStaffSession())) return;
     if (isSupabaseConfigured && supabase) {
       await supabase.from('profiles').update({ featured: nextVal }).eq('id', id);
     }
