@@ -2,14 +2,16 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Flame, TrendingUp, Clock, Loader2, Zap, Trophy, RefreshCw, UserPlus, PenLine, Camera, Swords, Sparkles } from 'lucide-react';
+import { Flame, TrendingUp, Clock, Loader2, Zap, RefreshCw, UserPlus, PenLine, Camera, Swords, Sparkles, Rocket } from 'lucide-react';
 import { FeedCard } from '@/components/feed';
 import InterestPicker from '@/components/feed/InterestPicker';
 import ForYouRails from '@/components/feed/ForYouRails';
-import PeopleYouMayLike from '@/components/feed/PeopleYouMayLike';
+import HomeHero from '@/components/feed/HomeHero';
+import HomeRightRail from '@/components/feed/HomeRightRail';
+import Avatar from '@/components/ui/Avatar';
+import FollowButton from '@/components/social/FollowButton';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import TodayOnBurnBoard from '@/components/feed/TodayOnBurnBoard';
-import TrendingSidebar from '@/components/feed/TrendingSidebar';
 import NotificationBell from '@/components/NotificationBell';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { track } from '@/lib/analytics';
@@ -36,6 +38,7 @@ const FEED_TABS = [
   { key: 'following', label: 'Following', icon: UserPlus },
   { key: 'for_you', label: 'For You', icon: Flame },
   { key: 'trending', label: 'Trending', icon: TrendingUp },
+  { key: 'rising', label: 'Rising', icon: Rocket },
 ];
 
 const TRENDING_WINDOWS = [
@@ -43,6 +46,12 @@ const TRENDING_WINDOWS = [
   { key: 'today', label: 'Today', icon: Clock },
   { key: 'week', label: 'Week', icon: TrendingUp },
 ];
+
+function formatCount(n) {
+  if (n == null) return '';
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
 
 export default function SocialHomePage() {
   const [activeTab, setActiveTab] = useState('for_you');
@@ -56,6 +65,13 @@ export default function SocialHomePage() {
   const [signedIn, setSignedIn] = useState(false);
   const [feedMeta, setFeedMeta] = useState({ personalized: false, coldStart: false, followingEmpty: false });
   const [hasNew, setHasNew] = useState(false);
+  // Rising Users tab: real suggestions from the recommendations API
+  // (same source as Explore). Paged as one bounded list — no fabricated
+  // pagination, no fake users; signed-out viewers get a sign-in prompt.
+  const [risingUsers, setRisingUsers] = useState([]);
+  const [risingLoading, setRisingLoading] = useState(false);
+  const [risingError, setRisingError] = useState('');
+  const [risingNeedsAuth, setRisingNeedsAuth] = useState(false);
   // Developer diagnostics (?debug=feed): exposes only product-level feed
   // metadata (counts, cursors, personalization flags). Internal ranking
   // scores are never sent by the API and never shown here.
@@ -282,14 +298,52 @@ export default function SocialHomePage() {
     return () => observerRef.current?.disconnect();
   }, [hasMore, loading, loadingMore, fetchFeed]);
 
-  // Handle tab change
+  // Rising Users: bounded real suggestions (signed-in only — the API is
+  // the auth gate; a 401 renders a sign-in prompt, never fake users).
+  const fetchRising = useCallback(async () => {
+    setRisingLoading(true);
+    setRisingError('');
+    setRisingNeedsAuth(false);
+    try {
+      const res = await fetch('/api/recommendations/creators?limit=12');
+      if (res.status === 401) {
+        setRisingNeedsAuth(true);
+        setRisingUsers([]);
+        return;
+      }
+      if (!res.ok) throw new Error('rising failed');
+      const data = await res.json();
+      setRisingUsers(data.items || []);
+    } catch (err) {
+      console.error('[Home] Rising error:', err);
+      setRisingError('load_failed');
+    } finally {
+      setRisingLoading(false);
+    }
+  }, []);
+
+  const handleRisingFollowed = useCallback((username) => (isFollowing) => {
+    if (isFollowing) {
+      setRisingUsers(prev => prev.filter(u => u.username !== username));
+      track('user_followed', { source: 'home_rising' });
+    }
+  }, []);
+
+  // Handle tab change (Rising leaves the post-feed pipeline and loads
+  // real user suggestions instead — feed state is still reset so nothing
+  // from another tab can leak across).
   const handleTabChange = useCallback((tab) => {
     tabRef.current = tab;
     setActiveTab(tab);
     resetFeedState();
     track('feed_tab_changed', { tab });
+    if (tab === 'rising') {
+      setHasMore(false);
+      fetchRising();
+      return;
+    }
     fetchFeed(true);
-  }, [fetchFeed, resetFeedState]);
+  }, [fetchFeed, resetFeedState, fetchRising]);
 
   // Handle trending window change
   const handleWindowChange = useCallback((win) => {
@@ -389,27 +443,14 @@ export default function SocialHomePage() {
                 ? 'Latest from people you follow, in order.'
                 : activeTab === 'trending'
                   ? 'What is gaining attention right now.'
-                  : 'Picked for you from across BurnBoard.'}
+                  : activeTab === 'rising'
+                    ? 'New and growing voices worth a follow.'
+                    : 'Picked for you from across BurnBoard.'}
             </p>
           </div>
 
-          {/* Quick composer — entry points only; creation lives in /create */}
-          <Link
-            href="/create"
-            className="flex min-h-[56px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 backdrop-blur-xl transition-all hover:border-[#ff4d00]/40 active:scale-[0.99]"
-          >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ff4d00]/15 text-[#ff4d00]">
-              <PenLine className="h-4 w-4" />
-            </span>
-            <span className="flex-1 truncate text-sm text-zinc-500">
-              What are you burning about?
-            </span>
-            <span className="flex shrink-0 items-center gap-1">
-              <span title="Photo" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Camera className="h-4 w-4" /></span>
-              <span title="Battle" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Swords className="h-4 w-4" /></span>
-              <span title="Challenge" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Sparkles className="h-4 w-4" /></span>
-            </span>
-          </Link>
+          {/* Welcome hero — dismissible, real copy only */}
+          <HomeHero signedIn={signedIn} />
 
           <div className="space-y-4">
             {/* Feed Tabs — Following is only for signed-in users and stays
@@ -436,6 +477,24 @@ export default function SocialHomePage() {
                 );
               })}
             </div>
+
+            {/* Quick composer — entry points only; creation lives in /create */}
+            <Link
+              href="/create"
+              className="flex min-h-[56px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 backdrop-blur-xl transition-all hover:border-[#ff4d00]/40 active:scale-[0.99]"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ff4d00]/15 text-[#ff4d00]">
+                <PenLine className="h-4 w-4" />
+              </span>
+              <span className="flex-1 truncate text-sm text-zinc-500">
+                What are you burning about?
+              </span>
+              <span className="flex shrink-0 items-center gap-1">
+                <span title="Photo" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Camera className="h-4 w-4" /></span>
+                <span title="Battle" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Swords className="h-4 w-4" /></span>
+                <span title="Challenge" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Sparkles className="h-4 w-4" /></span>
+              </span>
+            </Link>
 
             {/* Trending Window Tabs (only when on trending tab) */}
             {activeTab === 'trending' && (
@@ -464,10 +523,115 @@ export default function SocialHomePage() {
             )}
           </div>
 
+          {/* ═══ Rising Users (real suggestions, bounded list) ═══ */}
+          {activeTab === 'rising' && (
+            <div className="space-y-4">
+              {risingLoading && (
+                <div className="space-y-3">
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 animate-pulse">
+                      <div className="w-10 h-10 rounded-full bg-[#222]" />
+                      <div className="flex-1 space-y-1.5">
+                        <div className="w-24 h-3 bg-[#222] rounded" />
+                        <div className="w-36 h-2 bg-[#1a1a1a] rounded" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {risingError && !risingLoading && (
+                <div className="space-y-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center">
+                  <p className="text-sm font-bold text-zinc-200">Couldn&apos;t load rising users.</p>
+                  <p className="text-xs text-zinc-500">Check your connection and try again.</p>
+                  <button
+                    onClick={fetchRising}
+                    className="inline-flex min-h-[44px] items-center px-5 bg-[#ff4d00] text-black text-xs font-black uppercase tracking-wider rounded-2xl hover:bg-[#ff6622] transition-all active:scale-95"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+              {!risingLoading && !risingError && risingNeedsAuth && (
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8 text-center space-y-3">
+                  <p className="text-sm font-bold text-white">Sign in to discover rising voices.</p>
+                  <p className="text-xs text-zinc-500">Suggestions are personalized — or browse Explore freely.</p>
+                  <div className="flex items-center justify-center gap-2">
+                    <Link
+                      href="/auth?next=%2Fhome"
+                      className="inline-flex min-h-[44px] items-center px-5 bg-[#ff4d00] text-black text-xs font-black uppercase tracking-wider rounded-2xl hover:bg-[#ff6622] transition-all active:scale-95"
+                    >
+                      Sign in
+                    </Link>
+                    <Link
+                      href="/explore"
+                      className="inline-flex min-h-[44px] items-center px-5 border border-white/15 text-zinc-200 text-xs font-bold rounded-2xl hover:border-white/30 hover:text-white transition-all"
+                    >
+                      Explore
+                    </Link>
+                  </div>
+                </div>
+              )}
+              {!risingLoading && !risingError && !risingNeedsAuth && risingUsers.length === 0 && (
+                <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center space-y-3">
+                  <p className="text-sm font-bold text-zinc-200">Quiet for now.</p>
+                  <p className="text-xs text-zinc-500">No rising users to show — more people appear as the community grows.</p>
+                  <Link
+                    href="/discover"
+                    className="inline-flex min-h-[44px] items-center px-5 bg-[#ff4d00] text-black text-xs font-black uppercase tracking-wider rounded-2xl hover:bg-[#ff6622] transition-all active:scale-95"
+                  >
+                    Discover people
+                  </Link>
+                </div>
+              )}
+              {!risingLoading && !risingError && !risingNeedsAuth && risingUsers.length > 0 && (
+                <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+                  <div className="divide-y divide-white/5">
+                    {risingUsers.map(person => (
+                      <div key={person.id} className="flex items-center gap-3 px-4 py-3">
+                        <Link href={`/u/${person.username}`} className="shrink-0" aria-label={`Open @${person.username}`}>
+                          <Avatar username={person.username} size="md" src={person.avatarUrl} />
+                        </Link>
+                        <div className="min-w-0 flex-1">
+                          <Link
+                            href={`/u/${person.username}`}
+                            className="block truncate text-sm font-bold text-white hover:text-[#ff4d00] transition-colors"
+                          >
+                            @{person.username}
+                          </Link>
+                          <p className="truncate font-mono text-[11px] text-zinc-500">
+                            {person.reason?.text || 'New and growing'}
+                            {person.followerCount > 0 && (
+                              <span className="text-zinc-600"> · {formatCount(person.followerCount)} followers</span>
+                            )}
+                          </p>
+                        </div>
+                        <FollowButton
+                          targetUserId={person.id}
+                          initialIsFollowing={false}
+                          initialFollowerCount={person.followerCount || 0}
+                          label={person.mutual ? 'Follow back' : 'Follow'}
+                          size="sm"
+                          onFollowChange={handleRisingFollowed(person.username)}
+                          className="shrink-0"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <Link
+                    href="/discover"
+                    className="block border-t border-white/10 px-4 py-3 text-center font-mono text-[11px] text-[#ff4d00] transition-colors hover:text-white"
+                  >
+                    Discover more people →
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ═══ Feed Content ═══ */}
-          
+
           {/* Loading State */}
-          {loading && (
+          {loading && activeTab !== 'rising' && (
             <div className="space-y-4">
               {[...Array(3)].map((_, i) => (
                 <CardSkeleton key={i} />
@@ -476,7 +640,7 @@ export default function SocialHomePage() {
           )}
 
           {/* Error State — friendly copy only; technical details stay in logs */}
-          {error && !loading && (
+          {error && !loading && activeTab !== 'rising' && (
             <div className="space-y-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center">
               <p className="text-sm font-bold text-zinc-200">Your feed couldn&apos;t load.</p>
               <p className="text-xs text-zinc-500">Check your connection and try again.</p>
@@ -490,7 +654,7 @@ export default function SocialHomePage() {
           )}
 
           {/* Realtime: new content is one tap away — never auto-injected */}
-          {hasNew && !loading && !error && items.length > 0 && (
+          {hasNew && !loading && !error && items.length > 0 && activeTab !== 'rising' && (
             <div className="flex justify-center">
               <button
                 onClick={() => { resetFeedState(); fetchFeed(true); }}
@@ -511,7 +675,7 @@ export default function SocialHomePage() {
           )}
 
           {/* Empty State */}
-          {!loading && !error && items.length === 0 && (
+          {!loading && !error && items.length === 0 && activeTab !== 'rising' && (
             activeTab === 'following' && signedIn && feedMeta.followingEmpty ? (
               <div className="bg-[#111] border border-dashed border-[#333] rounded-2xl p-10 text-center space-y-4">
                 <div className="text-5xl">👋</div>
@@ -550,7 +714,7 @@ export default function SocialHomePage() {
           )}
 
           {/* Feed Items */}
-          {!loading && items.length > 0 && (
+          {!loading && items.length > 0 && activeTab !== 'rising' && (
             <div className="space-y-4">
               {/* Today on BurnBoard (only on For You tab, at top) */}
               {activeTab === 'for_you' && <TodayOnBurnBoard />}
@@ -617,9 +781,7 @@ export default function SocialHomePage() {
 
         {/* ═══ Desktop Right Sidebar ═══ */}
         <aside className="hidden xl:block w-80 shrink-0 pl-8 pr-4 py-6 space-y-6">
-          {/* Personalized user discovery (signed-in viewers only) */}
-          <PeopleYouMayLike signedIn={signedIn} />
-          <TrendingSidebar />
+          <HomeRightRail signedIn={signedIn} />
         </aside>
       </div>
     </div>
