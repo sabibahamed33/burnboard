@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Flame, TrendingUp, Clock, Loader2, Zap, RefreshCw, UserPlus, PenLine, Camera, Swords, Sparkles, Rocket } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Flame, TrendingUp, Clock, Loader2, Zap, RefreshCw, UserPlus, PenLine, Camera, Swords, Sparkles, Rocket, Search, X } from 'lucide-react';
 import { FeedCard } from '@/components/feed';
 import InterestPicker from '@/components/feed/InterestPicker';
 import ForYouRails from '@/components/feed/ForYouRails';
@@ -54,7 +55,9 @@ function formatCount(n) {
 }
 
 export default function SocialHomePage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('for_you');
+  const [searchInput, setSearchInput] = useState('');
   const [items, setItems] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(true);
@@ -413,14 +416,44 @@ export default function SocialHomePage() {
         {/* ═══ Main Feed Column ═══ */}
         <div className="flex-1 min-w-0 max-w-2xl mx-auto lg:mx-0 lg:max-w-none px-4 sm:px-6 pt-4 pb-6 space-y-5">
           {/* Brand header — compact; shell owns nav */}
-          <header className="flex min-h-[44px] items-center justify-between">
-            <Link href="/" className="flex items-center gap-1.5" aria-label="BurnBoard home">
+          <header className="flex min-h-[44px] items-center gap-3">
+            <Link href="/" className="flex shrink-0 items-center gap-1.5" aria-label="BurnBoard home">
               <Flame className="h-5 w-5 fill-[#ff4d00] text-[#ff4d00]" />
               <span className="text-[15px] font-black tracking-wide text-white">
                 BURNBOARD
               </span>
             </Link>
-            <div className="flex items-center gap-1">
+            {/* Desktop search → real global search */}
+            <form
+              role="search"
+              className="relative hidden min-w-0 flex-1 md:block"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const q = searchInput.trim();
+                router.push(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
+              }}
+            >
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search BurnBoard..."
+                aria-label="Search BurnBoard"
+                className="min-h-[44px] w-full rounded-2xl border border-white/10 bg-white/[0.04] pl-10 pr-10 text-sm text-white placeholder-zinc-500 backdrop-blur-xl transition-all focus:border-[#ff4d00]/50 focus:outline-none"
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={() => setSearchInput('')}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 flex min-h-[32px] min-w-[32px] -translate-y-1/2 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:text-white"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </form>
+            <div className="ml-auto flex shrink-0 items-center gap-1">
               <NotificationBell />
               <button
                 onClick={() => { resetFeedState(); fetchFeed(true); }}

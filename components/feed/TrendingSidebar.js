@@ -44,7 +44,8 @@ export default function TrendingSidebar() {
 
     const fetchTrending = async () => {
       try {
-        // Get top roasts by engagement from last 24h
+        // Get top roasts by engagement from last 24h. Hidden/moderated
+        // roasts are excluded here exactly as in feeds (RLS backstop).
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
         const { data, error } = await supabase
@@ -54,6 +55,7 @@ export default function TrendingSidebar() {
             profiles!inner(username, avatar_letter, avatar_color),
             created_at
           `)
+          .eq('is_hidden', false)
           .gte('created_at', since)
           .order('upvotes', { ascending: false })
           .limit(5);
@@ -115,7 +117,7 @@ export default function TrendingSidebar() {
             {trending.map((roast, index) => (
               <Link
                 key={roast.id}
-                href={`/post/${roast.id}`}
+                href={`/r/${roast.id}`}
                 className="block px-4 py-3 hover:bg-[#1a1a1a] transition-colors group"
               >
                 <div className="flex items-start gap-3">

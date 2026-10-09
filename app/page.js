@@ -548,7 +548,7 @@ export default function HomePage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search targets by handle, bio or platform..."
+              placeholder="Search people, posts, and topics..."
               className="w-full bg-[#0a0a0a] border border-[#262626] rounded-xl pl-4 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#ff4d00]"
             />
           </div>

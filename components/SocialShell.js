@@ -45,6 +45,9 @@ export default function SocialShell({ children }) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [user, setUser] = useState(null);
+  // Real profile username for the account link (email prefixes are NOT
+  // usernames — guessing one leads to someone else's 404 or profile).
+  const [profileUsername, setProfileUsername] = useState(null);
 
   // Track auth state
   useEffect(() => {
@@ -63,6 +66,28 @@ export default function SocialShell({ children }) {
 
     return () => subscription?.unsubscribe();
   }, []);
+
+  // Resolve the signed-in user's real username (username lives in
+  // user_profiles, not in the email address).
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !user?.id) {
+      setProfileUsername(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from('user_profiles')
+      .select('username')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setProfileUsername(data?.username || null);
+      })
+      .catch(() => {
+        if (!cancelled) setProfileUsername(null);
+      });
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -152,15 +177,20 @@ export default function SocialShell({ children }) {
         <div className="p-3 border-t border-white/[0.06]">
           {user ? (
             <Link
-              href={`/u/${user.email?.split('@')[0] || 'user'}`}
+              href={profileUsername ? `/u/${profileUsername}` : '/settings/profile'}
               className="glass-soft flex items-center gap-3 px-3 py-2.5 rounded-2xl hover:border-[#ff4d00]/40 transition-all"
+              aria-label={profileUsername ? `Open your profile (@${profileUsername})` : 'Finish setting up your profile'}
             >
               <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#ff4d00] to-amber-400 flex items-center justify-center text-xs font-black text-black">
-                {user.email?.[0]?.toUpperCase() || '?'}
+                {(profileUsername || user.email)?.[0]?.toUpperCase() || '?'}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-white truncate">{user.email?.split('@')[0] || 'User'}</p>
-                <p className="text-[10px] text-zinc-500 font-mono truncate">{user.email}</p>
+                <p className="text-xs font-bold text-white truncate">
+                  {profileUsername ? `@${profileUsername}` : (user.email?.split('@')[0] || 'User')}
+                </p>
+                <p className="text-[10px] text-zinc-500 font-mono truncate">
+                  {profileUsername ? 'View profile' : 'Finish profile setup'}
+                </p>
               </div>
               <NotificationBell />
             </Link>

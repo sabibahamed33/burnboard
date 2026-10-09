@@ -48,7 +48,8 @@ export default function HomeHero({ signedIn }) {
       >
         <X className="h-4 w-4" />
       </button>
-      <div className="relative space-y-2.5">
+      <div className="relative flex items-center gap-4">
+        <div className="min-w-0 flex-1 space-y-2.5">
         <p className="flex items-center gap-1.5 text-xs font-bold text-[#ff4d00]">
           <Flame className="h-4 w-4 fill-[#ff4d00]/20" aria-hidden="true" />
           {signedIn ? 'Welcome back' : 'Welcome to BurnBoard'}
@@ -62,7 +63,17 @@ export default function HomeHero({ signedIn }) {
           Discover, roast, and connect with the realest people on the internet.
           Your next favorite roast is waiting.
         </p>
-        <div className="flex flex-wrap items-center gap-2 pt-1">
+        </div>
+        {/* Decorative fire emblem — CSS + icon only, never a generated image */}
+        <div aria-hidden="true" className="pointer-events-none relative hidden h-32 w-32 shrink-0 items-center justify-center sm:flex">
+          <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle,rgba(255,77,0,0.35),transparent_65%)]" />
+          <Flame className="h-20 w-20 fill-[#ff4d00]/15 text-[#ff4d00] drop-shadow-[0_0_25px_rgba(255,77,0,0.55)]" />
+          <span className="absolute left-4 top-6 h-1 w-1 rounded-full bg-[#ff4d00]/70" />
+          <span className="absolute right-6 top-10 h-1.5 w-1.5 rounded-full bg-amber-400/60" />
+          <span className="absolute bottom-5 left-8 h-1 w-1 rounded-full bg-[#ff4d00]/50" />
+        </div>
+      </div>
+      <div className="relative flex flex-wrap items-center gap-2 pt-3">
           {signedIn ? (
             <>
               <Link
@@ -95,7 +106,6 @@ export default function HomeHero({ signedIn }) {
               </Link>
             </>
           )}
-        </div>
       </div>
     </section>
   );
