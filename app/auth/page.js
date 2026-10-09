@@ -5,6 +5,7 @@ import { Flame, Mail, Lock, User, Eye, EyeOff, ArrowRight, Loader2, Check, Alert
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { safeInternalPath } from '@/lib/growth/referral';
 import { track } from '@/lib/analytics';
+import { trackGrowthEvent } from '@/lib/experiments';
 
 function getPasswordStrength(pw) {
   let score = 0;
@@ -173,7 +174,7 @@ export default function AuthPage() {
           setLoading(false);
           return;
         }
-        track('password_reset_requested', {});
+        trackGrowthEvent('password_reset_requested');
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
           redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent('/settings/security')}`,
         });
@@ -190,7 +191,9 @@ export default function AuthPage() {
       }
 
       if (mode === 'signup') {
-        track('signup_started', {});        if (!username.trim() || username.length < 3) {
+        // Funnel entry: recorded locally + server-side (fire-and-forget,
+        // never blocks signup). No PII — aggregate counts only.
+        trackGrowthEvent('signup_started');        if (!username.trim() || username.length < 3) {
           setError('Username must be at least 3 characters');
           setLoading(false);
           return;
@@ -235,7 +238,7 @@ export default function AuthPage() {
             setError(friendlyAuthError(signUpError, 'Sign-up failed. Please try again.'));
           }
         } else if (data.user) {
-          track('signup_completed', { userId: data.user.id });
+          trackGrowthEvent('signup_completed');
           // Email-confirmation-required projects return a user but NO
           // session. Never claim a working account until the operation
           // confirms one: pending users get verification instructions and
@@ -280,7 +283,7 @@ export default function AuthPage() {
         } else {
           // Real referral conversion on sign-in (idempotent, best-effort).
           fireAttribution({ next, ref, isSignup: false });
-          if (signInData?.user) track('login_completed', { userId: signInData.user.id });
+          if (signInData?.user) trackGrowthEvent('login_completed');
           setSuccess('Welcome back! Redirecting...');
           setTimeout(() => { window.location.href = next || '/'; }, 1000);
         }
@@ -383,7 +386,7 @@ export default function AuthPage() {
                   try {
                     const { data: { session } } = await supabase.auth.getSession();
                     if (session) {
-                      track('verification_completed', {});
+                      trackGrowthEvent('verification_completed');
                       const next = getNextPath();
                       fireAttribution({ next, ref: getRefCode(), isSignup: true });
                       window.location.href = `/welcome?next=${encodeURIComponent(next || '/')}`;

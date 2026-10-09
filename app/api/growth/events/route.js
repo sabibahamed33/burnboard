@@ -24,6 +24,19 @@ const VALID_EVENT_TYPES = [
   'primary_cta_viewed',
   'primary_cta_clicked',
   'discovery_opened',
+
+  // Auth & activation (Onboarding 2.0 funnel — privacy-safe, no PII;
+  // subject is the existing anonymous id or server-resolved user id)
+  'signup_started',
+  'signup_completed',
+  'verification_completed',
+  'login_completed',
+  'password_reset_requested',
+  'welcome_opened',
+  'profile_setup_completed',
+  'interest_selection_completed',
+  'onboarding_completed',
+  'onboarding_skipped',
   
   // Activation
   'hot_seat_creation_started',

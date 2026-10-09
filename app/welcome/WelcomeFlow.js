@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { track } from '@/lib/analytics';
+import { trackGrowthEvent } from '@/lib/experiments';
 import InterestPicker from '@/components/feed/InterestPicker';
 import SuggestedForYou from '@/components/discover/SuggestedForYou';
 
@@ -46,7 +47,8 @@ export default function WelcomeFlow({ next = '/', here = '/welcome' }) {
       const saved = parseInt(sessionStorage.getItem(STEP_KEY) || '0', 10);
       if (Number.isFinite(saved) && saved >= 0 && saved < STEPS.length) setStep(saved);
     } catch {}
-    track('welcome_opened', {});
+    // Funnel entry, recorded locally + server-side (never blocks setup).
+    trackGrowthEvent('welcome_opened');
     if (!isSupabaseConfigured || !supabase) return;
     let cancelled = false;
     supabase.auth.getSession().then(({ data }) => {
@@ -79,12 +81,12 @@ export default function WelcomeFlow({ next = '/', here = '/welcome' }) {
       sessionStorage.removeItem(STEP_KEY);
       localStorage.setItem(DONE_KEY, new Date().toISOString());
     } catch {}
-    track('onboarding_completed', { skipped: !!skipped, destination: next });
+    trackGrowthEvent('onboarding_completed', { skipped: !!skipped });
     router.push(next || '/');
   }, [next, router]);
 
   const skipAll = useCallback(() => {
-    track('onboarding_skipped', { fromStep: STEPS[step] });
+    trackGrowthEvent('onboarding_skipped', { fromStep: STEPS[step] });
     finish(true);
   }, [finish, step]);
 
@@ -113,7 +115,7 @@ export default function WelcomeFlow({ next = '/', here = '/welcome' }) {
         return;
       }
       setIdentityOk(true);
-      track('profile_setup_completed', {});
+      trackGrowthEvent('profile_setup_completed');
       goStep(2);
     } catch {
       setIdentityError('Connection issue — your input is preserved. Retry or skip; nothing is lost.');
@@ -270,7 +272,7 @@ export default function WelcomeFlow({ next = '/', here = '/welcome' }) {
                 </h1>
                 <p className="text-xs text-zinc-400">Tunes your feed. Optional — skip freely.</p>
               </div>
-              <InterestPicker onApplied={() => track('interest_selection_completed', {})} />
+              <InterestPicker onApplied={() => trackGrowthEvent('interest_selection_completed')} />
               <div className="flex items-center gap-2">
                 <button
                   type="button"
