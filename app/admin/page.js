@@ -23,6 +23,8 @@ export default function AdminPage() {
   const [roastsToday, setRoastsToday] = useState(0);
   const [topProfile, setTopProfile] = useState(null);
   const [recentRoasts, setRecentRoasts] = useState([]);
+  // Honest outcome feedback for privileged mutations (never silent).
+  const [adminMsg, setAdminMsg] = useState(null);
 
   // Growth Dashboard state
   const [funnelData, setFunnelData] = useState(null);
@@ -160,31 +162,63 @@ export default function AdminPage() {
     // Server-verified staff session first: the password flag alone never
     // authorizes destruction (RLS remains the database backstop).
     if (!(await verifyStaffSession())) return;
-    if (isSupabaseConfigured && supabase) {
-      await supabase.from('roasts').delete().eq('id', id);
+    // The write result is verified — the UI only changes on real success.
+    // Anon-key writes blocked by RLS must never display as deleted.
+    setAdminMsg(null);
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.from('roasts').delete().eq('id', id);
+        if (error) throw error;
+      }
+      setRoasts(prev => prev.filter(r => r.id !== id));
+      setRecentRoasts(prev => prev.filter(r => r.id !== id));
+      setAdminMsg({ tone: 'ok', text: 'Roast deleted.' });
+    } catch (err) {
+      console.error('[Admin] Delete roast failed:', err?.message || err);
+      setAdminMsg({ tone: 'error', text: 'Delete failed — the roast is still live. Check staff permissions and try again.' });
     }
-    setRoasts(prev => prev.filter(r => r.id !== id));
-    setRecentRoasts(prev => prev.filter(r => r.id !== id));
   };
 
   const handleDeleteProfile = async (id) => {
     if (!confirm('Delete this profile AND all its roasts permanently?')) return;
     if (!(await verifyStaffSession())) return;
-    if (isSupabaseConfigured && supabase) {
-      await supabase.from('roasts').delete().eq('profile_id', id);
-      await supabase.from('profiles').delete().eq('id', id);
+    setAdminMsg(null);
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { error: roastsError } = await supabase.from('roasts').delete().eq('profile_id', id);
+        if (roastsError) throw roastsError;
+        const { error: profileError } = await supabase.from('profiles').delete().eq('id', id);
+        if (profileError) throw profileError;
+      }
+      setProfiles(prev => prev.filter(p => p.id !== id));
+      setRoasts(prev => prev.filter(r => r.profile_id !== id));
+      setAdminMsg({ tone: 'ok', text: 'Profile and its roasts deleted.' });
+    } catch (err) {
+      console.error('[Admin] Delete profile failed:', err?.message || err);
+      // Partial failure is possible (roasts gone, profile kept) — resync
+      // from the server so the display never disagrees with reality.
+      setAdminMsg({ tone: 'error', text: 'Delete did not fully complete. Data reloaded to show the true state.' });
+      loadData();
     }
-    setProfiles(prev => prev.filter(p => p.id !== id));
-    setRoasts(prev => prev.filter(r => r.profile_id !== id));
   };
 
   const handleToggleFeature = async (id, currentFeatured) => {
     const nextVal = !currentFeatured;
     if (!(await verifyStaffSession())) return;
-    if (isSupabaseConfigured && supabase) {
-      await supabase.from('profiles').update({ featured: nextVal }).eq('id', id);
+    setAdminMsg(null);
+    // Optimistic flip with verified rollback — never stuck on a false state.
+    setProfiles(prev => prev.map(p => (p.id === id ? { ...p, featured: nextVal } : p)));
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.from('profiles').update({ featured: nextVal }).eq('id', id);
+        if (error) throw error;
+      }
+      setAdminMsg({ tone: 'ok', text: nextVal ? 'Profile featured.' : 'Profile unfeatured.' });
+    } catch (err) {
+      console.error('[Admin] Feature toggle failed:', err?.message || err);
+      setProfiles(prev => prev.map(p => (p.id === id ? { ...p, featured: currentFeatured } : p)));
+      setAdminMsg({ tone: 'error', text: 'Update failed — reverted. Check staff permissions and try again.' });
     }
-    setProfiles(prev => prev.map(p => p.id === id ? { ...p, featured: nextVal } : p));
   };
 
   // Experiment lifecycle management
@@ -270,6 +304,20 @@ export default function AdminPage() {
           </div>
         </div>
       </div>
+
+      {/* Privileged-action outcome (honest success/failure, never silent) */}
+      {adminMsg && (
+        <p
+          role={adminMsg.tone === 'error' ? 'alert' : 'status'}
+          className={`rounded-xl border px-4 py-3 text-xs font-mono ${
+            adminMsg.tone === 'error'
+              ? 'border-red-500/30 bg-red-950/40 text-red-300'
+              : 'border-emerald-500/30 bg-emerald-950/40 text-emerald-300'
+          }`}
+        >
+          {adminMsg.text}
+        </p>
+      )}
 
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 bg-[#111] p-1 rounded-xl border border-[#222] overflow-x-auto">
