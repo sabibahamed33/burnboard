@@ -263,7 +263,7 @@ function ProfileCard({ profile, roasts, onUpvote, onReact, onShare, onReport }) 
 
         {displayedRoasts.length === 0 && (
           <div className="p-4 bg-[#0a0a0a] rounded-xl border border-dashed border-[#222] text-center text-xs text-zinc-500">
-            No burns yet! Be the first human to roast @{profile.username}.
+            No roasts here yet — be the first to start the fire.
           </div>
         )}
       </div>
@@ -471,7 +471,7 @@ export default function HomePage() {
             <ProfileCardSkeleton />
           </div>
           <div className="text-center py-4" role="status" aria-label="Loading feed">
-            <p className="type-micro animate-pulse">Loading...</p>
+            <p className="type-micro animate-pulse">Your feed is warming up.</p>
           </div>
         </div>
       </div>
@@ -617,7 +617,7 @@ export default function HomePage() {
                 ) : (
                   <>
                     <ChevronDown className="w-4 h-4" />
-                    Load More Targets
+                    Load more
                   </>
                 )}
               </button>
@@ -627,7 +627,7 @@ export default function HomePage() {
           {/* End of Feed */}
           {!hasMore && filteredProfiles.length > 0 && !searchQuery && (
             <div className="text-center pt-4">
-              <p className="text-xs text-zinc-500 font-mono">🔥 You&apos;ve seen all targets — go roast someone!</p>
+              <p className="text-xs text-zinc-500 font-mono">🔥 You&apos;ve caught up — come back later for more.</p>
             </div>
           )}
 
@@ -637,13 +637,21 @@ export default function HomePage() {
               <div className="text-4xl">🔥</div>
               <div>
                 <h3 className="text-base font-bold text-white uppercase tracking-wider">
-                  {searchQuery ? 'No matching targets' : 'No burns yet'}
+                  {searchQuery ? 'No matches found' : 'Your feed is warming up'}
                 </h3>
                 <p className="text-xs text-zinc-400 max-w-sm mx-auto mt-1">
                   {searchQuery
-                    ? `No profiles matching "${searchQuery}". Put them in the hot seat yourself!`
-                    : 'No targets found. Submit the first profile to start roasting!'}
+                    ? `Nothing matching "${searchQuery}" yet. Try another search or start something new.`
+                    : 'Follow a few people to personalize your feed, or start the first conversation.'}
                 </p>
+              </div>
+              <div>
+                <a
+                  href={searchQuery ? '/hot-seat' : '/discover'}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-[#ff4d00] text-black font-black text-xs rounded-xl hover:bg-[#ff6622] transition-all uppercase tracking-wider"
+                >
+                  {searchQuery ? '🔥 Start the fire' : 'Discover people'}
+                </a>
               </div>
             </div>
           )}

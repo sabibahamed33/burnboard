@@ -23,12 +23,12 @@ function formatCount(n) {
 
 export default function PeopleYouMayLike({ signedIn }) {
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(signedIn);
-  const [hidden, setHidden] = useState(false);
+  const [loading, setLoading] = useState(!!signedIn);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!signedIn) {
-      setHidden(true);
+      setLoading(false);
       return;
     }
     let cancelled = false;
@@ -39,10 +39,10 @@ export default function PeopleYouMayLike({ signedIn }) {
         const data = await res.json();
         if (!cancelled) {
           setItems(data.items || []);
-          if (!(data.items || []).length) setHidden(true);
+          setFailed(false);
         }
       } catch {
-        if (!cancelled) setHidden(true);
+        if (!cancelled) setFailed(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -57,15 +57,20 @@ export default function PeopleYouMayLike({ signedIn }) {
     }
   }, []);
 
-  if (hidden) return null;
+  if (failed) return null;
+
+  const empty = !loading && items.length === 0;
 
   return (
     <div className="bg-[#111] border border-[#222] rounded-2xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-[#222] flex items-center gap-2">
-        <Users className="w-4 h-4 text-[#ff4d00]" />
-        <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-          People you may like
+      <div className="px-4 py-3 border-b border-[#222] flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-wider font-mono">
+          <Users className="w-4 h-4 text-[#ff4d00]" />
+          Suggested People
         </h3>
+        <Link href="/discover" className="font-mono text-[11px] text-[#ff4d00] transition-colors hover:text-white">
+          View all →
+        </Link>
       </div>
 
       {loading ? (
@@ -79,6 +84,23 @@ export default function PeopleYouMayLike({ signedIn }) {
               </div>
             </div>
           ))}
+        </div>
+      ) : empty ? (
+        <div className="p-5 text-center space-y-2">
+          <p className="text-xs font-bold text-zinc-200">
+            {signedIn ? 'No suggestions right now.' : 'Sign in to get suggestions.'}
+          </p>
+          <p className="text-[11px] text-zinc-500">
+            {signedIn
+              ? 'More people appear as the community grows.'
+              : 'Follow real people to personalize your feed.'}
+          </p>
+          <Link
+            href="/discover"
+            className="inline-flex min-h-[44px] items-center px-5 bg-[#ff4d00] text-black text-[11px] font-black uppercase tracking-wider rounded-xl hover:bg-[#ff6622] transition-all active:scale-95"
+          >
+            Discover people
+          </Link>
         </div>
       ) : (
         <div className="divide-y divide-[#1a1a1a]">

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Flame, Home, Compass, Plus, Swords, Bell, User, Search,
-  TrendingUp, Trophy, Calendar, Menu, X, ChevronRight, Users, Sparkles, BarChart3, Gem, BrainCircuit, MessageCircle
+  TrendingUp, Trophy, Calendar, Menu, X, ChevronRight, Users, Sparkles, BarChart3, Gem, BrainCircuit, MessageCircle, Settings as SettingsIcon, LifeBuoy
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import UnreadBadge from './dm/UnreadBadge';
@@ -23,22 +23,25 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
  */
 
 const NAV_ITEMS = [
-  { key: 'home', label: 'Feed', shortLabel: 'Feed', icon: Home, href: '/home' },
+  { key: 'home', label: 'Home', shortLabel: 'Home', icon: Home, href: '/home' },
   { key: 'explore', label: 'Explore', shortLabel: 'Explore', icon: Compass, href: '/explore' },
   { key: 'create', label: 'Create', shortLabel: 'Create', icon: Plus, href: '/create', accent: true },
   { key: 'battles', label: 'Battles', shortLabel: 'Battles', icon: Swords, href: '/battle' },
-  { key: 'leaderboard', label: 'Rankings', shortLabel: 'Rank', icon: Trophy, href: '/leaderboards' },
+  { key: 'challenges', label: 'Challenges', shortLabel: 'Challenges', icon: Sparkles, href: '/challenges' },
 ];
 
 const SECONDARY_ITEMS = [
-  { key: 'messages', label: 'Messages', icon: MessageCircle, href: '/messages', badge: true },
   { key: 'communities', label: 'Communities', icon: Users, href: '/c' },
-  { key: 'challenges', label: 'Challenges', icon: Sparkles, href: '/challenges' },
-  { key: 'weekly', label: 'Weekly Recap', icon: Calendar, href: '/weekly' },
-  { key: 'top', label: 'Top Roasts', icon: TrendingUp, href: '/top' },
+  { key: 'messages', label: 'Messages', icon: MessageCircle, href: '/messages', badge: true },
   { key: 'notifications', label: 'Notifications', icon: Bell, href: '/notifications' },
-  { key: 'ai', label: 'Your AI', icon: BrainCircuit, href: '/ai' },
+];
+
+const FOOTER_ITEMS = [
   { key: 'premium', label: 'Premium', icon: Gem, href: '/premium' },
+  { key: 'settings', label: 'Settings', icon: SettingsIcon, href: '/settings' },
+  // No dedicated Help page exists — Settings is the real destination for
+  // account help, safety, and support links. Never a dead link.
+  { key: 'help', label: 'Help & Support', icon: LifeBuoy, href: '/settings' },
 ];
 
 export default function SocialShell({ children }) {
@@ -100,10 +103,14 @@ export default function SocialShell({ children }) {
     return pathname.startsWith(href);
   };
 
-  // My Insights is available to every signed-in user — no special account type.
-  const secondaryItems = user
-    ? [...SECONDARY_ITEMS, { key: 'insights', label: 'My Insights', icon: BarChart3, href: '/insights' }]
-    : SECONDARY_ITEMS;
+  // Spec order: Home, Explore, Create, Battles, Challenges, Communities,
+  // Messages, Notifications, Profile — then Premium, Settings, Help & Support.
+  // Profile resolves to the viewer's real username (never a guessed handle).
+  const profileHref = profileUsername ? `/u/${profileUsername}` : '/settings/profile';
+  const secondaryItems = [
+    ...SECONDARY_ITEMS,
+    { key: 'profile', label: 'Profile', icon: User, href: profileHref },
+  ];
 
   return (
     <div className="social-shell">
@@ -153,7 +160,9 @@ export default function SocialShell({ children }) {
           {/* Secondary Nav */}
           {secondaryItems.map(item => {
             const Icon = item.icon;
-            const active = isActive(item.href);
+            const active = item.key === 'profile'
+              ? (profileUsername && pathname === `/u/${profileUsername}`)
+              : isActive(item.href);
             return (
               <Link
                 key={item.key}
@@ -168,6 +177,28 @@ export default function SocialShell({ children }) {
                 <Icon className={`w-4 h-4 ${active ? 'text-[#ff4d00]' : ''}`} />
                 <span>{item.label}</span>
                 {item.badge && user && <UnreadBadge />}
+              </Link>
+            );
+          })}
+
+          {/* Divider + Premium / Settings / Help */}
+          <div className="h-px bg-white/[0.06] my-3" />
+          {FOOTER_ITEMS.map(item => {
+            const Icon = item.icon;
+            const active = isActive(item.href) && item.key !== 'help';
+            return (
+              <Link
+                key={item.key}
+                href={item.href}
+                aria-current={active ? 'page' : undefined}
+                className={`flex items-center gap-3 px-3 py-2 rounded-2xl text-xs font-mono transition-all min-h-[44px] ${
+                  active
+                    ? 'glass glass-active text-white'
+                    : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05]'
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${active ? 'text-[#ff4d00]' : ''}`} />
+                <span>{item.label}</span>
               </Link>
             );
           })}

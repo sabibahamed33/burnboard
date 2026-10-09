@@ -34,6 +34,7 @@ function timeAgo(dateString) {
 
 export default function TrendingSidebar() {
   const [trending, setTrending] = useState([]);
+  const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -43,6 +44,17 @@ export default function TrendingSidebar() {
     }
 
     const fetchTrending = async () => {
+      // Real trending search topics (distinct-user velocity, never fabricated).
+      // Fails soft: an empty list renders the friendly empty state.
+      try {
+        const res = await fetch('/api/search/trending?window=today');
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data.trends)) {
+          setTopics(data.trends.slice(0, 5));
+        }
+      } catch (err) {
+        // Silent fail — topics section stays hidden
+      }
       try {
         // Get top roasts by engagement from last 24h. Hidden/moderated
         // roasts are excluded here exactly as in feeds (RLS backstop).
@@ -88,13 +100,16 @@ export default function TrendingSidebar() {
     <div className="space-y-6 sticky top-6">
       {/* Today's Spark */}
       <TodaysSpark />
-      {/* Trending Now */}
+      {/* Trending Now — real topics first, top burns below */}
       <div className="bg-[#111] border border-[#222] rounded-2xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-[#222] flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-[#ff4d00]" />
-          <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-            TRENDING NOW
+        <div className="px-4 py-3 border-b border-[#222] flex items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-wider font-mono">
+            <TrendingUp className="w-4 h-4 text-[#ff4d00]" />
+            Trending Now
           </h3>
+          <Link href="/explore" className="font-mono text-[11px] text-[#ff4d00] transition-colors hover:text-white">
+            View all →
+          </Link>
         </div>
 
         {loading ? (
@@ -106,50 +121,85 @@ export default function TrendingSidebar() {
               </div>
             ))}
           </div>
-        ) : trending.length === 0 ? (
+        ) : topics.length === 0 && trending.length === 0 ? (
           <div className="p-4 text-center">
             <p className="text-[11px] text-zinc-500 font-mono">
-              No trending content yet
+              Nothing trending here yet.
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-[#1a1a1a]">
-            {trending.map((roast, index) => (
-              <Link
-                key={roast.id}
-                href={`/r/${roast.id}`}
-                className="block px-4 py-3 hover:bg-[#1a1a1a] transition-colors group"
-              >
-                <div className="flex items-start gap-3">
-                  <span className="text-[10px] font-mono text-zinc-600 mt-1 shrink-0">
-                    {index + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs text-zinc-300 leading-relaxed line-clamp-2 group-hover:text-white transition-colors">
-                      &ldquo;{roast.roast_text}&rdquo;
-                    </p>
-                    <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono text-zinc-500">
-                      <span className="flex items-center gap-1">
-                        <div className={`w-3 h-3 rounded-full flex items-center justify-center text-[6px] font-black ${roast.profiles?.avatar_color || 'bg-[#ff4d00] text-black'}`}>
-                          {roast.profiles?.avatar_letter || '?'}
-                        </div>
-                        @{roast.profiles?.username || 'anon'}
+          <>
+            {topics.length > 0 && (
+              <div className="divide-y divide-[#1a1a1a]">
+                {topics.map((t, index) => {
+                  const name = t.query || t.term || t.tag || '';
+                  if (!name) return null;
+                  const count = t.count ?? t.searches ?? t.posts ?? null;
+                  return (
+                    <Link
+                      key={`topic-${index}-${name}`}
+                      href={`/search?q=${encodeURIComponent(name)}`}
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#1a1a1a] transition-colors group"
+                    >
+                      <span className="text-[10px] font-mono text-zinc-600 shrink-0 w-4">
+                        {index + 1}
                       </span>
-                      <span>·</span>
-                      <span className="text-[#ff4d00]">🔥 {formatCount(roast.engagement)}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-bold text-zinc-200 group-hover:text-white transition-colors">
+                          {name.startsWith('#') ? name : `#${name}`}
+                        </span>
+                        {count != null && (
+                          <span className="block font-mono text-[10px] text-zinc-500">
+                            {formatCount(count)} posts
+                          </span>
+                        )}
+                      </span>
+                      <ArrowUpRight className="w-3.5 h-3.5 text-[#ff4d00] opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+            {trending.length > 0 && (
+              <div className="divide-y divide-[#1a1a1a]">
+                {trending.map((roast, index) => (
+                  <Link
+                    key={roast.id}
+                    href={`/r/${roast.id}`}
+                    className="block px-4 py-3 hover:bg-[#1a1a1a] transition-colors group"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-[10px] font-mono text-zinc-600 mt-1 shrink-0">
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-zinc-300 leading-relaxed line-clamp-2 group-hover:text-white transition-colors">
+                          &ldquo;{roast.roast_text}&rdquo;
+                        </p>
+                        <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono text-zinc-500">
+                          <span className="flex items-center gap-1">
+                            <div className={`w-3 h-3 rounded-full flex items-center justify-center text-[6px] font-black ${roast.profiles?.avatar_color || 'bg-[#ff4d00] text-black'}`}>
+                              {roast.profiles?.avatar_letter || '?'}
+                            </div>
+                            @{roast.profiles?.username || 'anon'}
+                          </span>
+                          <span>·</span>
+                          <span className="text-[#ff4d00]">🔥 {formatCount(roast.engagement)}</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         <Link
-          href="/discover"
+          href="/explore"
           className="block px-4 py-3 border-t border-[#222] text-center text-[11px] font-mono text-[#ff4d00] hover:text-white transition-colors"
         >
-          See all trending →
+          View all →
         </Link>
       </div>
 

@@ -3,13 +3,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Flame, TrendingUp, Clock, Loader2, Zap, RefreshCw, UserPlus, PenLine, Camera, Swords, Sparkles, Rocket, Search, X } from 'lucide-react';
+import { Flame, TrendingUp, Clock, Loader2, Zap, RefreshCw, UserPlus, PenLine, Camera, Swords, Sparkles, Rocket, Search, X, MessageCircle, Plus, Smile } from 'lucide-react';
 import { FeedCard } from '@/components/feed';
 import InterestPicker from '@/components/feed/InterestPicker';
 import ForYouRails from '@/components/feed/ForYouRails';
 import HomeHero from '@/components/feed/HomeHero';
 import HomeRightRail from '@/components/feed/HomeRightRail';
 import Avatar from '@/components/ui/Avatar';
+import UnreadBadge from '@/components/dm/UnreadBadge';
 import FollowButton from '@/components/social/FollowButton';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import TodayOnBurnBoard from '@/components/feed/TodayOnBurnBoard';
@@ -36,10 +37,10 @@ import { mergeFeedItems, isKnownItem, accumulateSeenKeys } from '@/lib/feed/clie
  */
 
 const FEED_TABS = [
-  { key: 'following', label: 'Following', icon: UserPlus },
-  { key: 'for_you', label: 'For You', icon: Flame },
-  { key: 'trending', label: 'Trending', icon: TrendingUp },
-  { key: 'rising', label: 'Rising', icon: Rocket },
+  { key: 'for_you', label: 'For You', icon: Flame, hint: 'Personalized for you.' },
+  { key: 'following', label: 'Following', icon: UserPlus, hint: 'Posts from people you follow.' },
+  { key: 'trending', label: 'Trending', icon: TrendingUp, hint: 'Popular content right now.' },
+  { key: 'rising', label: 'Rising Users', icon: Rocket, hint: 'New and growing users.' },
 ];
 
 const TRENDING_WINDOWS = [
@@ -66,6 +67,8 @@ export default function SocialHomePage() {
   const [error, setError] = useState(null);
   const [trendingWindow, setTrendingWindow] = useState('today');
   const [signedIn, setSignedIn] = useState(false);
+  const [viewer, setViewer] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [feedMeta, setFeedMeta] = useState({ personalized: false, coldStart: false, followingEmpty: false });
   const [hasNew, setHasNew] = useState(false);
   // Rising Users tab: real suggestions from the recommendations API
@@ -238,12 +241,34 @@ export default function SocialHomePage() {
       if (cancelled) return;
       userIdRef.current = data?.user?.id || null;
       setSignedIn(!!data?.user);
+      const uid = data?.user?.id;
+      if (uid) {
+        supabase
+          .from('user_profiles')
+          .select('username, display_name, avatar_url')
+          .eq('id', uid)
+          .maybeSingle()
+          .then(({ data: prof }) => {
+            if (!cancelled && prof) {
+              setViewer({
+                username: prof.username || null,
+                displayName: prof.display_name || prof.username || null,
+                avatarUrl: prof.avatar_url || null,
+              });
+            }
+          })
+          .catch(() => {});
+      } else {
+        setViewer(null);
+      }
     }).catch(() => {});
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextId = session?.user?.id || null;
       if (nextId !== userIdRef.current) {
         userIdRef.current = nextId;
         setSignedIn(!!nextId);
+        setViewer(null);
+        setMenuOpen(false);
         resetFeedState();
         fetchFeed(true);
       }
@@ -415,12 +440,12 @@ export default function SocialHomePage() {
       <div className="max-w-6xl mx-auto flex">
         {/* ═══ Main Feed Column ═══ */}
         <div className="flex-1 min-w-0 max-w-2xl mx-auto lg:mx-0 lg:max-w-none px-4 sm:px-6 pt-4 pb-6 space-y-5">
-          {/* Brand header — compact; shell owns nav */}
+          {/* Top header: brand left, search center, actions right */}
           <header className="flex min-h-[44px] items-center gap-3">
             <Link href="/" className="flex shrink-0 items-center gap-1.5" aria-label="BurnBoard home">
               <Flame className="h-5 w-5 fill-[#ff4d00] text-[#ff4d00]" />
-              <span className="text-[15px] font-black tracking-wide text-white">
-                BURNBOARD
+              <span className="text-[15px] font-black tracking-wide">
+                <span className="text-white">BURN</span><span className="text-[#ff4d00]">BOARD</span>
               </span>
             </Link>
             {/* Desktop search → real global search */}
@@ -455,6 +480,57 @@ export default function SocialHomePage() {
             </form>
             <div className="ml-auto flex shrink-0 items-center gap-1">
               <NotificationBell />
+              <Link
+                href="/messages"
+                aria-label="Open messages"
+                className="relative flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span className="absolute -right-0.5 -top-0.5"><UnreadBadge /></span>
+              </Link>
+              <Link
+                href="/create"
+                aria-label="Create a post"
+                className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl bg-[#ff4d00] text-black transition-all hover:bg-[#ff6622] active:scale-95"
+              >
+                <Plus className="h-4 w-4" strokeWidth={2.5} />
+              </Link>
+              {viewer?.username ? (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen(v => !v)}
+                    aria-label="Account menu"
+                    aria-expanded={menuOpen}
+                    className="flex min-h-[40px] items-center gap-2 rounded-xl py-1 pl-1 pr-1.5 transition-colors hover:bg-white/5"
+                  >
+                    <Avatar username={viewer.username} size="sm" src={viewer.avatarUrl} />
+                    {viewer.displayName && (
+                      <span className="hidden max-w-[110px] truncate text-xs font-bold text-white xl:block">
+                        {viewer.displayName}
+                      </span>
+                    )}
+                  </button>
+                  {menuOpen && (
+                    <div className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-2xl border border-white/10 bg-[#161618]/95 shadow-2xl backdrop-blur-xl">
+                      <Link
+                        href={`/u/${viewer.username}`}
+                        onClick={() => setMenuOpen(false)}
+                        className="block px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-white/5"
+                      >
+                        Profile
+                      </Link>
+                      <Link
+                        href="/settings"
+                        onClick={() => setMenuOpen(false)}
+                        className="block border-t border-white/5 px-4 py-3 text-xs font-bold text-zinc-300 transition-colors hover:bg-white/5 hover:text-white"
+                      >
+                        Settings
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <button
                 onClick={() => { resetFeedState(); fetchFeed(true); }}
                 disabled={loading}
@@ -465,6 +541,36 @@ export default function SocialHomePage() {
               </button>
             </div>
           </header>
+          {/* Mobile search → same real global search */}
+          <form
+            role="search"
+            className="relative min-w-0 flex-1 md:hidden"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const q = searchInput.trim();
+              router.push(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
+            }}
+          >
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search BurnBoard..."
+              aria-label="Search BurnBoard"
+              className="min-h-[44px] w-full rounded-2xl border border-white/10 bg-white/[0.04] pl-10 pr-10 text-sm text-white placeholder-zinc-500 backdrop-blur-xl transition-all focus:border-[#ff4d00]/50 focus:outline-none"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => setSearchInput('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 flex min-h-[32px] min-w-[32px] -translate-y-1/2 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </form>
 
           {/* Context */}
           <div className="space-y-1">
@@ -472,23 +578,17 @@ export default function SocialHomePage() {
               Home
             </h1>
             <p className="text-xs text-zinc-500">
-              {activeTab === 'following'
-                ? 'Latest from people you follow, in order.'
-                : activeTab === 'trending'
-                  ? 'What is gaining attention right now.'
-                  : activeTab === 'rising'
-                    ? 'New and growing voices worth a follow.'
-                    : 'Picked for you from across BurnBoard.'}
+              {(FEED_TABS.find(t => t.key === activeTab)?.hint) || 'Picked for you from across BurnBoard.'}
             </p>
           </div>
 
           {/* Welcome hero — dismissible, real copy only */}
-          <HomeHero signedIn={signedIn} />
+          <HomeHero signedIn={signedIn} displayName={viewer?.displayName} />
 
           <div className="space-y-4">
             {/* Feed Tabs — Following is only for signed-in users and stays
                 distinctly chronological (never silently algorithmic). */}
-            <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-white/[0.03] p-1" role="tablist" aria-label="Feed">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar rounded-2xl border border-white/10 bg-white/[0.03] p-1" role="tablist" aria-label="Feed">
               {FEED_TABS.filter(tab => tab.key !== 'following' || signedIn).map(tab => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.key;
@@ -498,7 +598,7 @@ export default function SocialHomePage() {
                     role="tab"
                     aria-selected={active}
                     onClick={() => handleTabChange(tab.key)}
-                    className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${
+                    className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-xs font-bold transition-all active:scale-95 ${
                       active
                         ? 'bg-[#ff4d00] text-black shadow-[0_0_16px_rgba(255,77,0,0.35)]'
                         : 'text-zinc-400 hover:bg-white/5 hover:text-white'
@@ -520,12 +620,12 @@ export default function SocialHomePage() {
                 <PenLine className="h-4 w-4" />
               </span>
               <span className="flex-1 truncate text-sm text-zinc-500">
-                What are you burning about?
+                What&apos;s on your mind?
               </span>
               <span className="flex shrink-0 items-center gap-1">
                 <span title="Photo" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Camera className="h-4 w-4" /></span>
-                <span title="Battle" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Swords className="h-4 w-4" /></span>
-                <span title="Challenge" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Sparkles className="h-4 w-4" /></span>
+                <span title="Emoji" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"><Smile className="h-4 w-4" /></span>
+                <span title="Create" aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#ff4d00] text-black"><PenLine className="h-4 w-4" /></span>
               </span>
             </Link>
 

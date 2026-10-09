@@ -21,7 +21,7 @@ function dismissed() {
  * signed-out visitors get the brand promise. No stats, no imagery, no
  * fabricated social proof — typography and glow only.
  */
-export default function HomeHero({ signedIn }) {
+export default function HomeHero({ signedIn, displayName }) {
   const [hidden, setHidden] = useState(dismissed);
 
   if (hidden) return null;
@@ -52,7 +52,7 @@ export default function HomeHero({ signedIn }) {
         <div className="min-w-0 flex-1 space-y-2.5">
         <p className="flex items-center gap-1.5 text-xs font-bold text-[#ff4d00]">
           <Flame className="h-4 w-4 fill-[#ff4d00]/20" aria-hidden="true" />
-          {signedIn ? 'Welcome back' : 'Welcome to BurnBoard'}
+          {signedIn ? `Welcome back${displayName ? `, ${displayName}` : ''} 🔥` : 'Welcome to BurnBoard'}
         </p>
         <h2 className="max-w-md text-xl font-black leading-tight tracking-tight text-white sm:text-2xl">
           Real people. <span className="text-[#ff4d00]">Real roasts.</span>
