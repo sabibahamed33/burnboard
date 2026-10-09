@@ -82,7 +82,7 @@ export default function PremiumPage() {
             <h1 className="text-2xl font-black uppercase tracking-wider font-mono">BurnBoard Premium</h1>
           </div>
           <p className="text-xs text-zinc-400 max-w-md mx-auto font-mono leading-relaxed">
-            More tools for posting, more control for everyone. Real value — never a paywall on safety, privacy, or basic participation.
+            Support BurnBoard and get cosmetic perks. Never a paywall on safety, privacy, or basic participation — and never a boost to ranking, reach, votes, or moderation.
           </p>
 
           {catalog?.testMode && (
@@ -106,14 +106,17 @@ export default function PremiumPage() {
           </div>
         )}
 
-        {/* Value points — features stay honest, no paywalled safety */}
+        {/* Value points — cosmetic support only. Premium never buys feed
+            ranking, trending, search placement, votes, Battle wins, XP,
+            followers, reactions, reputation, or moderation outcomes. The
+            per-plan feature lists below come from the server catalog. */}
         {!loading && premium && (
           <>
             <div className="grid sm:grid-cols-3 gap-3">
               {[
-                { emoji: '📊', title: 'Advanced insights', text: 'Deeper insight into what performs, built on real data. Available to every user.' },
-                { emoji: '🎨', title: 'Profile customization', text: 'Make your profile yours without losing your identity.' },
-                { emoji: '🚀', title: 'Priority discovery & controls', text: 'More tools to find and be found — and to tune your feed.' },
+                { emoji: '🎨', title: 'Cosmetic perks', text: 'Optional visual touches for your profile. Never a trust or ranking signal.' },
+                { emoji: '📊', title: 'Richer insights', text: 'More detail on your own activity where available. Core insights stay free for everyone.' },
+                { emoji: '🔥', title: 'Keep it free', text: 'Premium directly supports free BurnBoard for the whole community. No ads sold here.' },
               ].map(f => (
                 <div key={f.title} className="bg-[#111] border border-[#222] rounded-2xl p-4">
                   <p className="text-2xl mb-2">{f.emoji}</p>
