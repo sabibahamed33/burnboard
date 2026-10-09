@@ -23,12 +23,18 @@ export async function generateMetadata({ params }) {
       .single();
 
     // Modern UGC posts live in social_posts; `/post/:id` must resolve them
-    // too (they are the primary share targets). RLS hides removed/private rows.
+    // too (they are the primary share targets). The anon client is RLS-gated
+    // AND explicitly filtered to public + visible rows, so private,
+    // followers-only, draft, removed, or under-review posts can never leak
+    // into metadata, Open Graph, or previews (they fall through to the
+    // safe not-found state below).
     if (!profile) {
       const { data: post } = await supabase
         .from('social_posts')
-        .select('id, content_type, content_text, user_id, created_at, user_profiles!inner(username, display_name)')
+        .select('id, content_type, content_text, media_url, user_id, created_at, user_profiles!inner(username, display_name)')
         .eq('id', id)
+        .eq('visibility', 'public')
+        .eq('moderation_state', 'visible')
         .maybeSingle();
 
       if (!post) {
@@ -43,6 +49,21 @@ export async function generateMetadata({ params }) {
       const excerpt = (post.content_text || 'A post on BurnBoard').slice(0, 120);
       const title = `@${authorName} on BurnBoard: "${excerpt.replace(/[\r\n]+/g, ' ')}…"`;
       const description = `"${excerpt.replace(/[\r\n]+/g, ' ')}…" — a ${post.content_type || 'post'} by @${authorName} on BurnBoard.`;
+      // Real public media is the honest preview (photo posts especially).
+      // Only absolute http(s) URLs are ever emitted — never data:, blob:,
+      // or javascript: schemes. Non-media posts keep the generated card.
+      const mediaImage =
+        typeof post.media_url === 'string' && /^https?:\/\//i.test(post.media_url)
+          ? post.media_url
+          : null;
+      const ogImage = mediaImage
+        ? { url: mediaImage, width: 1080, height: 1080, alt: `@${authorName} post on BURNBOARD` }
+        : {
+            url: `/api/og?template=roast&text=${encodeURIComponent(excerpt)}&username=${encodeURIComponent(authorName)}`,
+            width: 1080,
+            height: 1080,
+            alt: `@${authorName} post on BURNBOARD`,
+          };
 
       return {
         title,
@@ -54,17 +75,13 @@ export async function generateMetadata({ params }) {
           title,
           description,
           siteName: 'BURNBOARD',
-          images: [{
-            url: `/api/og?template=roast&text=${encodeURIComponent(excerpt)}&username=${encodeURIComponent(authorName)}`,
-            width: 1080,
-            height: 1080,
-            alt: `@${authorName} post on BURNBOARD`,
-          }],
+          images: [ogImage],
         },
         twitter: {
           card: 'summary_large_image',
           title: `@${authorName} on BURNBOARD`,
           description,
+          images: [ogImage.url],
         },
       };
     }

@@ -118,11 +118,18 @@ export default function FollowButton({
   };
 
   // Anonymous visitors cannot follow (no valid user id) — send them to auth
-  // instead of firing a request that is guaranteed to fail.
+  // instead of firing a request that is guaranteed to fail. The current
+  // public page is remembered so login returns them to this content.
+  const signInHref =
+    typeof window !== 'undefined' &&
+    window.location?.pathname?.startsWith('/') &&
+    `${window.location.pathname}${window.location.search || ''}`.length <= 500
+      ? `/auth?next=${encodeURIComponent(`${window.location.pathname}${window.location.search || ''}`)}`
+      : '/auth';
   if (!identityLoading && !signedIn) {
     return (
       <Link
-        href="/auth"
+        href={signInHref}
         className={`inline-flex items-center justify-center gap-1.5 font-bold rounded-xl transition-all duration-150 active:scale-95 ${
           sizes[size]
         } ${

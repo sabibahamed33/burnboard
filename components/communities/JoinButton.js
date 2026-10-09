@@ -58,7 +58,12 @@ export default function JoinButton({
     if (!isSupabaseConfigured || !supabase) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      router.push('/auth');
+      // Remember the destination: after login the visitor returns here.
+      const here =
+        typeof window !== 'undefined'
+          ? `${window.location.pathname}${window.location.search}`.slice(0, 500)
+          : '';
+      router.push(here && here.startsWith('/') ? `/auth?next=${encodeURIComponent(here)}` : '/auth');
       return;
     }
 

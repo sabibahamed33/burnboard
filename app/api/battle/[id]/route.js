@@ -8,7 +8,7 @@ import { track } from '@/lib/analytics';
  *
  * Returns a specific matchup with authoritative counts derived from the
  * battle_votes table. Supports ?participant_id for anon viewer resolution.
- * Powers shareable arena links (/battle?battle=ID).
+ * Powers stable shareable arena links (/battle/[id]; ?battle=ID is a legacy alias).
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';

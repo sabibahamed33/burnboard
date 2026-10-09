@@ -134,7 +134,8 @@ export default function ChallengeDetailPage() {
   const handleVote = useCallback(async (postId) => {
     if (votingId || !postId) return;
     if (!authUser) {
-      router.push('/auth');
+      // Remember the destination: after login the voter returns here.
+      router.push(`/auth?next=${encodeURIComponent(`/challenges/${slug}`)}`);
       return;
     }
     setVotingId(postId);
@@ -493,7 +494,7 @@ export default function ChallengeDetailPage() {
           {/* Primary CTA */}
           {!viewer && isActive && (
             <div className="bg-[#0f0f0f] border border-[#262626] rounded-xl p-3 text-center">
-              <Link href="/auth" className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#ff4d00] hover:bg-[#ff6622] text-black font-black text-xs uppercase tracking-wider rounded-xl transition-all">
+              <Link href={`/auth?next=${encodeURIComponent(`/challenges/${slug}`)}`} className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#ff4d00] hover:bg-[#ff6622] text-black font-black text-xs uppercase tracking-wider rounded-xl transition-all">
                 Sign in to join this challenge
               </Link>
             </div>

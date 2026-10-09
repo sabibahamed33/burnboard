@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useParams } from 'next/navigation';
 import {
   Swords, Flame, RefreshCw, Loader2, Share2, Check
 } from 'lucide-react';
@@ -28,7 +28,9 @@ function fmt(n) {
 
 export default function BattlePage() {
   const searchParams = useSearchParams();
-  const battleParam = searchParams.get('battle');
+  const routeParams = useParams();
+  // Stable deep link: /battle/[id] is canonical; ?battle= is a legacy alias.
+  const battleParam = searchParams.get('battle') || routeParams?.id || null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -83,9 +85,13 @@ export default function BattlePage() {
       setViewerVote(data.viewerVote || null);
       setVoting(null);
 
-      // Make the current matchup shareable without leaving the arena
-      if (typeof window !== 'undefined' && !battleIdToLoad) {
-        window.history.replaceState(null, '', `/battle?battle=${data.battle.id}`);
+      // Canonicalize to the stable deep link (/battle/[id]) without leaving
+      // the arena — legacy ?battle= links and random matchups converge here.
+      if (typeof window !== 'undefined' && data?.battle?.id) {
+        const canonical = `/battle/${data.battle.id}`;
+        if (window.location.pathname + window.location.search !== canonical) {
+          window.history.replaceState(null, '', canonical);
+        }
       }
       setLoading(false);
     } catch (err) {
@@ -168,7 +174,11 @@ export default function BattlePage() {
 
   // ── Share current matchup link ─────────────────────────────
   const handleShare = async () => {
-    const url = typeof window !== 'undefined' ? window.location.href : '';
+    // Canonical public URL only — never the query-alias form.
+    const url =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}${battleId ? `/battle/${battleId}` : window.location.pathname}`
+        : '';
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
