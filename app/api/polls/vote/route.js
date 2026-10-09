@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, ipKey, RATE_LIMITS, getClientIp } from '@/lib/serverRateLimit';
 
 /**
  * POST /api/polls/vote
- * 
- * Server-side validated poll voting endpoint.
- * 
+ *
+ * Server-side validated poll voting endpoint. One vote per identity per
+ * poll (switchable); the unique(poll_id, participant_id) constraint is the
+ * atomic backstop for concurrent duplicates, and per-identity + per-IP rate
+ * limits stop floods before they reach the database.
+ *
  * Body:
  *   - poll_id: string (required)
  *   - option_index: number (required)
@@ -14,6 +19,12 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || '';
+
+const IP_SALT = process.env.RATE_LIMIT_SALT || 'burnboard_secret_salt_2024';
+
+function hashIp(ip) {
+  return crypto.createHash('sha256').update((ip || '127.0.0.1') + IP_SALT).digest('hex').substring(0, 16);
+}
 
 function getSupabase() {
   if (!supabaseUrl || !supabaseKey) return null;
@@ -28,13 +39,34 @@ export async function POST(req) {
     }
 
     const body = await req.json();
-    const { poll_id, option_index, participant_id } = body;
+    const { poll_id, option_index } = body;
+    const participant_id = typeof body?.participant_id === 'string' ? body.participant_id.trim() : '';
 
     // Validate required fields
     if (!poll_id || option_index === undefined || !participant_id) {
       return NextResponse.json(
         { error: 'Missing required fields: poll_id, option_index, participant_id' },
         { status: 400 }
+      );
+    }
+
+    // Participant identity must be plausible (anon `anon_*` ids or UUIDs are
+    // tens of chars; junk/garbage ids are rejected before touching the DB).
+    if (participant_id.length < 6 || participant_id.length > 120) {
+      return NextResponse.json({ error: 'Invalid participant_id' }, { status: 400 });
+    }
+
+    // Rate limit voting per identity AND per hashed IP (sliding window).
+    // Limits are generic counts — never internal thresholds in responses
+    // beyond the retry guidance clients need.
+    const ipGate = checkRateLimit(ipKey(hashIp(getClientIp(req)), 'poll_vote_ip'), RATE_LIMITS.POLL_VOTE);
+    const idGate = checkRateLimit(ipKey(participant_id, 'poll_vote'), RATE_LIMITS.POLL_VOTE);
+    const gated = !ipGate.allowed ? ipGate : (!idGate.allowed ? idGate : null);
+    if (gated) {
+      const retryAfterSeconds = Math.ceil((gated.retryAfterMs || 0) / 1000);
+      return NextResponse.json(
+        { error: `Please wait before voting again. Try again in ${retryAfterSeconds} seconds.`, retryAfter: retryAfterSeconds },
+        { status: 429 }
       );
     }
 
@@ -89,8 +121,10 @@ export async function POST(req) {
         .update({ option_index })
         .eq('id', existingVote.id);
     } else {
-      // New vote
-      await supabase
+      // New vote. The unique(poll_id, participant_id) constraint is the
+      // atomic backstop: a concurrent duplicate insert fails with 23505 and
+      // is reported honestly as already-voted instead of double-counting.
+      const { error: insertError } = await supabase
         .from('poll_votes')
         .insert({
           poll_id,
@@ -98,14 +132,28 @@ export async function POST(req) {
           option_index,
         });
 
-      // Increment total votes
-      await supabase
-        .from('polls')
-        .update({ total_votes: (poll.total_votes || 0) + 1 })
-        .eq('id', poll_id);
+      if (insertError) {
+        // Lost a concurrent race — re-read the winner's row and answer
+        // truthfully. Never increment the counter on a failed insert.
+        if (insertError.code === '23505' || /duplicate|unique/i.test(insertError.message || '')) {
+          const { data: raced } = await supabase
+            .from('poll_votes')
+            .select('id, option_index')
+            .eq('poll_id', poll_id)
+            .eq('participant_id', participant_id)
+            .maybeSingle();
+          return NextResponse.json({
+            success: true,
+            action: raced && raced.option_index === option_index ? 'already_voted' : 'added',
+            option_index: raced ? raced.option_index : option_index,
+          });
+        }
+        console.error('[Polls] Vote insert error:', insertError.message);
+        return NextResponse.json({ error: 'Could not record vote. Please try again.' }, { status: 500 });
+      }
     }
 
-    // Get updated vote counts
+    // Get updated vote counts (derived from real rows — the source of truth)
     const { data: votes } = await supabase
       .from('poll_votes')
       .select('option_index')
@@ -122,6 +170,15 @@ export async function POST(req) {
     results.forEach(r => {
       r.percentage = totalVotes > 0 ? Math.round((r.votes / totalVotes) * 100) : 0;
     });
+
+    // Self-healing counter: the denormalized total is reconciled to the real
+    // row count instead of a racy read-modify-write increment, so past drift
+    // (e.g. from failed inserts) converges back to truth. Best-effort.
+    try {
+      if (totalVotes !== (poll.total_votes || 0)) {
+        await supabase.from('polls').update({ total_votes: totalVotes }).eq('id', poll_id);
+      }
+    } catch {}
 
     return NextResponse.json({
       success: true,
