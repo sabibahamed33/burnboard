@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Flame, Mail, Lock, User, Eye, EyeOff, ArrowRight, Loader2, Check, AlertTriangle } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { safeInternalPath } from '@/lib/growth/referral';
+import { track } from '@/lib/analytics';
 
 function getPasswordStrength(pw) {
   let score = 0;
@@ -31,6 +32,12 @@ export default function AuthPage() {
   const [success, setSuccess] = useState('');
   const [usernameStatus, setUsernameStatus] = useState('idle');
   const [usernameSuggestion, setUsernameSuggestion] = useState('');
+  // Expired/invalid callback links land here with ?error=auth_callback_failed.
+  const [callbackError, setCallbackError] = useState('');
+  // Email-confirmation-required projects: account exists, session pending.
+  const [verifyPending, setVerifyPending] = useState('');
+  // Password-reset confirmation state (forgot mode).
+  const [resetSent, setResetSent] = useState('');
 
   const passwordStrength = getPasswordStrength(password);
 
@@ -63,6 +70,12 @@ export default function AuthPage() {
     } catch { return null; }
   };
 
+  const getCallbackError = () => {
+    try {
+      return new URLSearchParams(window.location.search).get('error') || '';
+    } catch { return ''; }
+  };
+
   // Fire the real signup-destination save + referral claim (best-effort).
   const fireAttribution = useCallback(async ({ next, ref, isSignup }) => {
     if (isSignup && next) {
@@ -81,7 +94,15 @@ export default function AuthPage() {
   }, []);
 
   // Returning users are redirected home; new visitors keep their destination.
+  // Expired/invalid verification links surface a recovery message instead
+  // of failing silently.
   useEffect(() => {
+    if (getCallbackError() === 'auth_callback_failed') {
+      setCallbackError(
+        'That sign-in link expired or was already used. Sign in below with your password, or request a new link.'
+      );
+      track('auth_callback_failed_shown', {});
+    }
     if (isSupabaseConfigured && supabase) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session) {
@@ -130,6 +151,7 @@ export default function AuthPage() {
     e.preventDefault();
     setError('');
     setSuccess('');
+    if (loading) return; // duplicate-submission guard
     setLoading(true);
 
     try {
@@ -142,9 +164,33 @@ export default function AuthPage() {
 
       const next = getNextPath();
       const ref = getRefCode();
+      const trimmedEmail = email.trim();
+
+      // ── Forgot password (email reset link, real Supabase flow) ──
+      if (mode === 'forgot') {
+        if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+          setError('Enter the email address for your account.');
+          setLoading(false);
+          return;
+        }
+        track('password_reset_requested', {});
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent('/settings/security')}`,
+        });
+        if (resetError) {
+          setError(friendlyAuthError(resetError, 'Could not send the reset email. Please try again.'));
+        } else {
+          // Neutral wording either way — never confirm whether the email
+          // belongs to an account (no account-enumeration signal).
+          setResetSent(trimmedEmail);
+          setSuccess('');
+        }
+        setLoading(false);
+        return;
+      }
 
       if (mode === 'signup') {
-        if (!username.trim() || username.length < 3) {
+        track('signup_started', {});        if (!username.trim() || username.length < 3) {
           setError('Username must be at least 3 characters');
           setLoading(false);
           return;
@@ -180,20 +226,52 @@ export default function AuthPage() {
         });
 
         if (signUpError) {
-          setError(friendlyAuthError(signUpError, 'Sign-up failed. Please try again.'));
+          // Neutral on existing accounts: guide without confirming whether
+          // the email is registered (no account-enumeration signal).
+          if (/already registered|already exists|already in use/i.test(signUpError.message || '')) {
+            track('signup_existing_account', {});
+            setError('An account with this email may already exist. Try signing in, or reset your password if needed.');
+          } else {
+            setError(friendlyAuthError(signUpError, 'Sign-up failed. Please try again.'));
+          }
         } else if (data.user) {
-          await supabase.from('user_profiles').insert({
+          track('signup_completed', { userId: data.user.id });
+          // Email-confirmation-required projects return a user but NO
+          // session. Never claim a working account until the operation
+          // confirms one: pending users get verification instructions and
+          // a way to continue after confirming.
+          if (!data.session) {
+            setVerifyPending(email.trim());
+            setSuccess('');
+            setLoading(false);
+            return;
+          }
+          const { error: profileError } = await supabase.from('user_profiles').insert({
             id: data.user.id,
             username: username.trim(),
             display_name: displayName.trim() || username.trim(),
             karma: 0,
             level: 'Newbie',
           });
+          if (profileError) {
+            // Repeated callbacks/inserts race on the same id: the profile
+            // already exists, safe to continue silently. A username conflict
+            // surfaces honestly — the user continues and fixes it in setup.
+            const detail = `${profileError.message || ''} ${profileError.details || ''}`.toLowerCase();
+            if (detail.includes('username')) {
+              setError('That username was just taken. Continue — you can pick another in the next step.');
+            }
+            console.warn('[Auth] Profile insert:', profileError.message);
+          }
           // Preserve the shared-link destination through signup (durable,
           // resurrected by /auth/callback when email confirmation is used).
           fireAttribution({ next, ref, isSignup: true });
-          setSuccess('Account created! Redirecting...');
-          setTimeout(() => { window.location.href = next || '/'; }, 1500);
+          setSuccess('Account created! Setting things up...');
+          // New accounts go through the short welcome flow first; the
+          // original destination is preserved through it.
+          setTimeout(() => {
+            window.location.href = `/welcome?next=${encodeURIComponent(next || '/')}`;
+          }, 1200);
         }
       } else {
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
@@ -202,6 +280,7 @@ export default function AuthPage() {
         } else {
           // Real referral conversion on sign-in (idempotent, best-effort).
           fireAttribution({ next, ref, isSignup: false });
+          if (signInData?.user) track('login_completed', { userId: signInData.user.id });
           setSuccess('Welcome back! Redirecting...');
           setTimeout(() => { window.location.href = next || '/'; }, 1000);
         }
@@ -224,18 +303,21 @@ export default function AuthPage() {
             </div>
           </div>
           <h1 className="text-2xl font-black uppercase tracking-tight">
-            {mode === 'signup' ? 'Join the Roast' : 'Welcome Back'}
+            {mode === 'signup' ? 'Join the Roast' : mode === 'forgot' ? 'Reset Password' : 'Welcome Back'}
           </h1>
           <p className="text-xs text-zinc-400">
             {mode === 'signup'
               ? 'Create an account to track your burns, earn karma, and build your roast reputation.'
-              : 'Sign in to continue roasting and earning karma.'}
+              : mode === 'forgot'
+                ? 'Enter your account email and we\u2019ll send you a reset link.'
+                : 'Sign in to continue roasting and earning karma.'}
           </p>
         </div>
 
         {/* Auth Card */}
         <div className="glass-strong rounded-3xl p-6 space-y-5 sm:p-7">
-          {/* Tab Toggle */}
+          {/* Tab Toggle (sign up / login — recovery uses its own header) */}
+          {mode !== 'forgot' && (
           <div className="glass-soft flex p-1 rounded-2xl" role="tablist" aria-label="Authentication mode">
             <button
               onClick={() => { setMode('signup'); setError(''); setSuccess(''); }}
@@ -254,13 +336,95 @@ export default function AuthPage() {
               Login
             </button>
           </div>
+          )}
 
+          {/* Expired/invalid link recovery (from /auth/callback) */}
+          {callbackError && (
+            <div className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 font-mono space-y-2" role="alert">
+              <p>{callbackError}</p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setCallbackError(''); setMode('login'); }}
+                  className="text-[#ff4d00] underline underline-offset-2 hover:text-white"
+                >
+                  Continue to sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCallbackError(''); setMode('forgot'); setError(''); setSuccess(''); }}
+                  className="text-zinc-400 underline underline-offset-2 hover:text-white"
+                >
+                  Get a new link
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Email-verification pending: account exists, session needs confirmation */}
+          {verifyPending ? (
+            <div className="space-y-4 text-center">
+              <div className="bg-[#0a0a0a] border border-[#262626] rounded-2xl p-5 space-y-2.5">
+                <p className="text-sm font-bold text-white">Check your email ✉️</p>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  We sent a confirmation link to <span className="text-zinc-200">{verifyPending}</span>.
+                  Open it to verify your account, then continue below.
+                </p>
+              </div>
+              {error && (
+                <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-3 text-xs text-red-400 font-mono">{error}</div>
+              )}
+              <button
+                type="button"
+                disabled={loading}
+                onClick={async () => {
+                  setError('');
+                  setLoading(true);
+                  try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (session) {
+                      track('verification_completed', {});
+                      const next = getNextPath();
+                      fireAttribution({ next, ref: getRefCode(), isSignup: true });
+                      window.location.href = `/welcome?next=${encodeURIComponent(next || '/')}`;
+                    } else {
+                      setError('Not verified yet — open the confirmation link first, then try again.');
+                    }
+                  } catch {
+                    setError('Could not check verification status. Please try again.');
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                className="btn-burn tactile w-full py-3 rounded-xl text-sm uppercase tracking-wider disabled:opacity-40"
+              >
+                {loading ? 'Checking…' : 'I verified — continue'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setVerifyPending(''); setMode('login'); setError(''); }}
+                className="text-xs text-zinc-500 hover:text-zinc-300 font-mono"
+              >
+                Use a different email
+              </button>
+            </div>
+          ) : (
+          <>
           {/* Messages */}
           {error && (
             <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-3 text-xs text-red-400 font-mono">{error}</div>
           )}
           {success && (
             <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-3 text-xs text-emerald-400 font-mono">{success}</div>
+          )}
+          {resetSent && mode === 'forgot' && (
+            <div className="bg-[#0a0a0a] border border-[#262626] rounded-2xl p-5 space-y-2.5 text-center">
+              <p className="text-sm font-bold text-white">Reset link sent ✉️</p>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                If an account exists for <span className="text-zinc-200">{resetSent}</span>, a reset link is on its way.
+                It expires soon — open it promptly.
+              </p>
+            </div>
           )}
 
           {/* Form */}
@@ -339,6 +503,7 @@ export default function AuthPage() {
               </div>
             </div>
 
+            {mode !== 'forgot' && (
             <div>
               <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Password</label>
               <div className="relative">
@@ -381,6 +546,19 @@ export default function AuthPage() {
                 </div>
               )}
             </div>
+            )}
+
+            {mode === 'login' && (
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => { setMode('forgot'); setError(''); setSuccess(''); setCallbackError(''); }}
+                  className="text-[11px] font-mono text-zinc-500 hover:text-[#ff4d00] transition-colors min-h-[32px]"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
 
             <button
               type="submit"
@@ -391,12 +569,30 @@ export default function AuthPage() {
               {loading ? <span className="spinner w-4 h-4" aria-hidden /> : (
                 <>
                   <Flame className="w-4 h-4 fill-black" />
-                  <span>{mode === 'signup' ? 'Create Account' : 'Sign In'}</span>
+                  <span>{mode === 'signup' ? 'Create Account' : mode === 'forgot' ? 'Send Reset Link' : 'Sign In'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
+            {mode === 'signup' && (
+              <p className="text-center text-[10px] font-mono text-zinc-600">
+                By creating an account you agree to our{' '}
+                <a href="/terms" className="text-zinc-400 underline underline-offset-2 hover:text-white">Terms</a>
+                {' '}and{' '}
+                <a href="/privacy" className="text-zinc-400 underline underline-offset-2 hover:text-white">Privacy Policy</a>.
+              </p>
+            )}
           </form>
+
+          {mode === 'forgot' && (
+            <button
+              type="button"
+              onClick={() => { setMode('login'); setError(''); setSuccess(''); setResetSent(''); }}
+              className="w-full min-h-[32px] text-xs text-zinc-500 hover:text-zinc-300 font-mono"
+            >
+              ← Back to sign in
+            </button>
+          )}
 
           {/* Anonymous Option */}
           <div className="text-center pt-2 border-t border-[#222]">
@@ -404,6 +600,8 @@ export default function AuthPage() {
               Skip — Continue as Anonymous 🔥
             </a>
           </div>
+          </>
+          )}
         </div>
 
         {/* Benefits */}

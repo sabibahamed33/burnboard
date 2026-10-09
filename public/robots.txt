@@ -4,6 +4,15 @@ Allow: /
 Disallow: /api/
 Disallow: /admin/
 Disallow: /auth/
+Disallow: /auth
+Disallow: /creator
+Disallow: /insights
+Disallow: /welcome
+Disallow: /settings
+Disallow: /messages
+Disallow: /messages/
+Disallow: /notifications
+Disallow: /s/
 Disallow: /offline
 
 # Block AI crawlers from scraping roast content
