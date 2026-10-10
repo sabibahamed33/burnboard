@@ -11,6 +11,10 @@
     {
       "path": "/api/process-notifications",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/synthetic",
+      "schedule": "0 0 * * *"
     }
   ],
   "headers": [
@@ -52,6 +56,18 @@
     },
     {
       "source": "/api/errors",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/api/control/observability",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/api/cron/synthetic",
       "headers": [
         { "key": "Cache-Control", "value": "no-store" }
       ]

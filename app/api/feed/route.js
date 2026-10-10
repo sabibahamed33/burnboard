@@ -458,6 +458,10 @@ async function getHandler(req) {
     });
   } catch (err) {
     console.error('[Feed] Error:', err);
+    try {
+      const { captureServerError } = await import('@/lib/observability/serverErrors');
+      captureServerError({ kind: 'feed_failed', route: '/api/feed', operation: 'GET /api/feed', statusCode: 500, message: err?.message || 'Feed error', stack: err?.stack });
+    } catch {}
     // Fail safe: never return a broken feed state.
     return NextResponse.json({ items: [], nextCursor: null, error: 'Internal server error' }, { status: 500 });
   }

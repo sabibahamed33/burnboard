@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { increment } from '@/lib/metrics';
+import { recordError } from '@/lib/observability/errorStore';
+import { evaluateAlerts } from '@/lib/observability/alerts';
 
 const log = createLogger('client-errors');
 
@@ -38,9 +40,10 @@ function rateLimited(ip) {
 
 /**
  * POST /api/errors — structured client error ingest.
- * Body: { kind, route, message, stack?, operation?, statusCode?, correlationId? }
+ * Body: { kind, route, message, stack?, operation?, statusCode?, correlationId?, severity? }
  * Always returns { ok: true } (or 429 when rate-limited) so reporting can
- * never break the user experience.
+ * never break the user experience. Events are grouped into incidents for
+ * the staff observability dashboard; alert rules evaluate fire-and-forget.
  */
 export async function POST(req) {
   try {
@@ -67,12 +70,24 @@ export async function POST(req) {
       // Stack kept server-side only, truncated.
       stack: typeof body.stack === 'string' ? body.stack.slice(0, 2000) : undefined,
       ua: (req.headers.get('user-agent') || '').slice(0, 200),
+      version: process.env.VERCEL_GIT_COMMIT_SHA
+        ? String(process.env.VERCEL_GIT_COMMIT_SHA).slice(0, 12)
+        : undefined,
     });
+    // Severity override honoured only for the known taxonomy values.
+    if (['critical', 'high', 'medium', 'low'].includes(body.severity)) {
+      clean.severity = body.severity;
+    }
     log.error('client_error', {
       ...clean,
       env: process.env.NODE_ENV || 'production',
     });
     increment('client.errors', { kind: String(body.kind || 'client_error').slice(0, 40) });
+    // Group into incidents + evaluate alert rules (never blocks response).
+    try {
+      recordError(clean);
+      evaluateAlerts().catch(() => {});
+    } catch {}
     return NextResponse.json({ ok: true });
   } catch (err) {
     try {

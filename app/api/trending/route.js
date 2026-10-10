@@ -103,6 +103,10 @@ async function getHandler(req) {
     return NextResponse.json({ success: true, scope, region: region || null, ...result });
   } catch (err) {
     console.error('[Trending] Error:', err);
+    try {
+      const { captureServerError } = await import('@/lib/observability/serverErrors');
+      captureServerError({ kind: 'trending_failed', route: '/api/trending', operation: 'GET /api/trending', statusCode: 500, message: err?.message || 'Trending error', stack: err?.stack });
+    } catch {}
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

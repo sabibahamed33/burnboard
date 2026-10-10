@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Shield, Loader2, LayoutGrid, Flag, Activity, Users, ScrollText, ToggleLeft, Siren } from 'lucide-react';
+import { Shield, Loader2, LayoutGrid, Flag, Activity, Users, ScrollText, ToggleLeft, Siren, Radar } from 'lucide-react';
 
 /**
  * /control layout — INTERNAL staff shell (not a public feature).
@@ -19,6 +19,7 @@ const NAV = [
   { href: '/control/audit', label: 'Audit Logs', icon: ScrollText },
   { href: '/control/flags', label: 'Flags', icon: ToggleLeft },
   { href: '/control/incidents', label: 'Incidents', icon: Siren },
+  { href: '/control/observability', label: 'Observability', icon: Radar },
   { href: '/control/health', label: 'Health', icon: Activity },
   { href: '/admin/security', label: 'Security', icon: Flag },
 ];
