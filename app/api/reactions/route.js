@@ -194,19 +194,15 @@ export async function POST(req) {
         reaction_type,
       });
 
-      // Award reputation for reacting (non-critical)
-      try {
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            participant_id,
-            event_type: 'reaction',
-            source_type: target_type,
-            source_id: target_id,
-          }),
-        });
-      } catch (e) {}
+      // Award reputation for reacting (non-critical). Only signed-in
+      // reactors earn XP — anonymous participant ids are rotatable and
+      // must never mint reputation. Direct service call, session user.
+      if (sessionUserId) {
+        try {
+          const { awardRep } = await import('@/lib/reputation/awardService');
+          await awardRep({ userId: sessionUserId, eventType: 'reaction', sourceType: target_type, sourceId: target_id });
+        } catch (e) {}
+      }
     }
 
     // Real behavior signal: a genuine reaction was created/switched by the

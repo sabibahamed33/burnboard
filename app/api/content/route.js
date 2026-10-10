@@ -124,7 +124,15 @@ export async function POST(req) {
         if (!opt || !opt.trim()) {
           return NextResponse.json({ error: 'All poll options must have text' }, { status: 400 });
         }
+        if (opt.trim().length > 120) {
+          return NextResponse.json({ error: 'Poll options must be 120 characters or less' }, { status: 400 });
+        }
       }
+    }
+
+    // Free-form client context is stored in metadata — bound it.
+    if (context !== undefined && context !== null && String(context).length > 500) {
+      return NextResponse.json({ error: 'Context must be 500 characters or less' }, { status: 400 });
     }
 
     // ── Safety pipeline (Master Prompt 11) — before any write ───
@@ -317,10 +325,15 @@ export async function POST(req) {
       }
     }
 
-    // Get authenticated user (legacy path resolves from the browser client;
-    // context posts already resolved a real user above)
-    const { data: { user } } = await supabase.auth.getUser();
-    const resolvedUserId = contextUserId || user?.id || null;
+    // Author identity: the signed-in session is the ONLY author source.
+    // The database boundary enforces auth.uid() = user_id on insert, so
+    // anonymous creates can never succeed — fail with an honest 401
+    // instead of an RLS-driven 500. (The legacy anon-client getUser call
+    // below is removed: it can never resolve a user.)
+    if (!contextUserId) {
+      return NextResponse.json({ error: 'Sign in to create posts.' }, { status: 401 });
+    }
+    const resolvedUserId = contextUserId;
 
     // Create the social post — one canonical record. Community/challenge are
     // context only; author ownership, reactions, comments stay unified.
@@ -376,10 +389,11 @@ export async function POST(req) {
       });
     } catch {}
 
-    // If it's a poll, create the poll record
+    // If it's a poll, create the poll record through the session client
+    // (same RLS identity as the post — never the anonymous client).
     let pollData = null;
     if (content_type === 'poll' && options) {
-      const { data: poll, error: pollError } = await supabase
+      const { data: poll, error: pollError } = await contextClient
         .from('polls')
         .insert({
           post_id: post.id,
@@ -403,24 +417,13 @@ export async function POST(req) {
       pingMilestones(contextClient, resolvedUserId).catch(() => {});
     }
 
-    // Award reputation for content creation (published posts only)
+    // Award reputation for content creation (published posts only).
+    // Direct service call with the session-resolved author — never an
+    // HTTP round-trip carrying a client-supplied user id.
     if (isPublished && resolvedUserId) {
       try {
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: resolvedUserId,
-            event_type: 'content_created',
-            source_type: 'social_post',
-            source_id: post.id,
-          }),
-        });
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: resolvedUserId, event_type: 'check_badges' }),
-        });
+        const { awardRep } = await import('@/lib/reputation/awardService');
+        await awardRep({ userId: resolvedUserId, eventType: 'content_created', sourceType: 'social_post', sourceId: post.id });
       } catch (e) {
         // Reputation award is non-critical
       }
@@ -463,16 +466,8 @@ export async function POST(req) {
 
         // Modest, abuse-resistant rep for participation (idempotent per challenge)
         try {
-          await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              user_id: resolvedUserId,
-              event_type: 'challenge_participated',
-              source_type: 'challenge',
-              source_id: challenge.id,
-            }),
-          });
+          const { awardRep } = await import('@/lib/reputation/awardService');
+          await awardRep({ userId: resolvedUserId, eventType: 'challenge_participated', sourceType: 'challenge', sourceId: challenge.id });
         } catch {}
 
         // Real behavior signal: participating in a challenge is a genuine

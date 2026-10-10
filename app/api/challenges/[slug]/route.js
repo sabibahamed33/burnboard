@@ -153,16 +153,10 @@ export async function PATCH(req, { params }) {
             .eq('id', winner.post_id)
             .maybeSingle();
           if (winningPost?.user_id) {
-            await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                user_id: winningPost.user_id,
-                event_type: 'challenge_won',
-                source_type: 'challenge',
-                source_id: existing.id,
-              }),
-            }).catch(() => {});
+            try {
+              const { awardRep } = await import('@/lib/reputation/awardService');
+              await awardRep({ userId: winningPost.user_id, eventType: 'challenge_won', sourceType: 'challenge', sourceId: existing.id });
+            } catch {}
           }
         }
       } catch {

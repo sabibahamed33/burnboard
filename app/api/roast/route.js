@@ -19,6 +19,15 @@ async function postHandler(req) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    // Length bounds: the roasts table has no CHECK constraint, so enforce
+    // here (queue bloat + oversized render protection).
+    if (roast_text.trim().length > 2000) {
+      return NextResponse.json({ error: 'Roast must be 2000 characters or less' }, { status: 400 });
+    }
+    const cleanAnonId = typeof anon_id === 'string' && anon_id.trim()
+      ? anon_id.trim().slice(0, 40)
+      : 'Anon Roaster';
+
     // 1. IP Hash determination
     const forwardedFor = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '127.0.0.1';
     const ip = forwardedFor.split(',')[0].trim();
@@ -89,7 +98,7 @@ async function postHandler(req) {
       const newRoast = {
         profile_id,
         roast_text: roast_text.trim(),
-        anon_id: anon_id || 'Anon Roaster',
+        anon_id: cleanAnonId,
         ip_hash,
         upvotes: 0,
         reaction_haha: 0,
@@ -106,7 +115,9 @@ async function postHandler(req) {
         .single();
 
       if (insertError) {
-        return NextResponse.json({ error: insertError.message }, { status: 500 });
+        // Never leak database internals to the client.
+        console.error('[Roast] Insert error:', insertError.message);
+        return NextResponse.json({ error: 'Failed to submit roast. Please try again.' }, { status: 500 });
       }
 
       // Trigger email notifications in background (Task 4)
@@ -133,7 +144,7 @@ async function postHandler(req) {
         id: 'roast-' + Date.now(),
         profile_id,
         roast_text: roast_text.trim(),
-        anon_id: anon_id || 'Anon Roaster',
+        anon_id: cleanAnonId,
         ip_hash,
         upvotes: 0,
         reaction_haha: 0,

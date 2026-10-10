@@ -114,13 +114,23 @@ export async function POST(req) {
     }
 
     const cleanText = typeof text === 'string' ? text.trim().slice(0, MAX_TEXT) : '';
+    // Attachments are rendered as photos — accept https URLs only, bounded
+    // length (rejects javascript:/data: payloads and oversized strings).
+    let cleanAttachment = null;
+    if (attachment_url) {
+      const v = String(attachment_url).trim();
+      if (v.length > 2000 || !/^https:\/\/[^\s]+$/i.test(v)) {
+        return NextResponse.json({ error: 'Attachment URL looks invalid.' }, { status: 400 });
+      }
+      cleanAttachment = v;
+    }
     let sharedRef = null;
     if (shared_kind || shared_id) {
       const check = await validateShareRef(client, shared_kind, shared_id, userId);
       if (!check.ok) return NextResponse.json({ error: check.error }, { status: 400 });
       sharedRef = check.ref;
     }
-    if (!cleanText && !attachment_url && !sharedRef) {
+    if (!cleanText && !cleanAttachment && !sharedRef) {
       return NextResponse.json({ error: 'Write a message or attach something to share' }, { status: 400 });
     }
 
@@ -226,8 +236,8 @@ export async function POST(req) {
           thread_id: thread.id,
           sender_id: userId,
           message: cleanText,
-          attachment_url: attachment_url || null,
-          attachment_type: attachment_url ? 'photo' : null,
+          attachment_url: cleanAttachment,
+          attachment_type: cleanAttachment ? 'photo' : null,
           shared_ref: sharedRef,
           reply_to_id: reply_to_id || null,
         })

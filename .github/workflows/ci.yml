@@ -27,6 +27,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Type gate: the shipping product (app + lib + middleware) must type
+      # clean. Legacy src/ (dead Vite tree) is excluded by tsconfig.ci.json
+      # and tracked as debt — it never ships to production.
+      - name: Typecheck (shipping product)
+        run: npm run typecheck:ci
+
+      # Security regression tests: open-redirect, redaction, error grouping,
+      # hashtag grammar, and static authorization-pattern checks. No DB.
+      - name: Security regression tests
+        run: npm run security-tests
+
+      # Dependency audit gate: fails on any HIGH/CRITICAL advisory outside
+      # scripts/security-audit-baseline.json (documented residuals only).
+      - name: Dependency vulnerability audit
+        run: npm run dependency-audit
+
       # Build gate: untested code cannot silently reach production.
       # Builds without env vars (Supabase URLs etc.) — the app tolerates
       # unconfigured clients at build time by design (isSupabaseConfigured).

@@ -1,0 +1,29 @@
+{
+  "_note": "Documented residual advisories. CI fails on any high/critical advisory NOT listed here. Remove an entry once it is actually fixed (never to silence the gate).",
+  "baseline": [
+    {
+      "name": "next",
+      "severity": "critical",
+      "reason": "14.2.35 is the latest patched 14.x. Residual range covers 15.x-line issues and self-hosted-only vectors; this deployment runs on Vercel with images.unoptimized (optimizer off). Major migration to Next 15 tracked separately.",
+      "compensating": "Vercel hosting (no self-host image optimizer DoS); images.unoptimized:true; server Actions body limit 2mb; middleware fail-open only for session refresh, never authz."
+    },
+    {
+      "name": "firebase-admin",
+      "severity": "high",
+      "reason": "Fix requires breaking major 12.x -> 14.x. Used only lazily by the push-notification cron (server-only); RSA/node-forge path not exercised.",
+      "compensating": "Lazy server-only import; no client certificate handling; no user-supplied crypto input."
+    },
+    {
+      "name": "node-forge",
+      "severity": "high",
+      "reason": "Transitive via firebase-admin; same breaking-major constraint as above.",
+      "compensating": "Same as firebase-admin."
+    },
+    {
+      "name": "postcss",
+      "severity": "high",
+      "reason": "Nested postcss@8.4.31 pinned by next@14.2.35 (top-level is patched 8.5.26). Only fixable via Next 15 major migration.",
+      "compensating": "Build-time CSS parser only — parses first-party stylesheets at build, never user input at runtime."
+    }
+  ]
+}

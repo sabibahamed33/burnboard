@@ -217,18 +217,10 @@ export async function POST(req) {
     }
 
     // ── Non-critical hooks ──────────────────────────────────
-    // Burn Rep for creating a community
+    // Burn Rep for creating a community (direct service call, session user)
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          event_type: 'community_created',
-          source_type: 'community',
-          source_id: community.id,
-        }),
-      });
+      const { awardRep } = await import('@/lib/reputation/awardService');
+      await awardRep({ userId, eventType: 'community_created', sourceType: 'community', sourceId: community.id });
     } catch (e) {}
 
     // Growth analytics event

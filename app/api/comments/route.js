@@ -19,16 +19,15 @@ import { pingMilestones } from '@/lib/creator/milestones';
  *   - limit: number (default: 20, max: 50)
  *   - cursor: ISO timestamp for pagination
  * 
- * POST /api/comments
- * 
+ * POST /api/comments (requires sign-in; the session is the author)
+ *
  * Create a new comment.
- * 
+ *
  * Body:
  *   - target_type: 'roast' | 'social_post' (required)
  *   - target_id: string (required)
  *   - text: string (required, max 500 chars)
- *   - parent_id: string (optional, for replies)
- *   - participant_id: string (required)
+ *   - parent_id: string (optional, for replies — must match same target)
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
@@ -72,7 +71,8 @@ async function getHandler(req) {
       } catch {}
     }
 
-    // Fetch top-level comments (no parent_id)
+    // Fetch top-level comments (no parent_id). Moderated content
+    // (removed/limited/under_review) never surfaces in public reads.
     let query = supabase
       .from('comments')
       .select(`
@@ -81,6 +81,7 @@ async function getHandler(req) {
       `)
       .eq('target_type', targetType)
       .eq('target_id', targetId)
+      .eq('moderation_state', 'visible')
       .is('parent_id', null)
       .limit(limit + 1);
 
@@ -115,6 +116,7 @@ async function getHandler(req) {
       const { data: replies } = await supabase
         .from('comments')
         .select('parent_id')
+        .eq('moderation_state', 'visible')
         .in('parent_id', commentIds);
 
       for (const r of replies || []) {
@@ -177,19 +179,28 @@ async function postHandler(req) {
     }
 
     const body = await req.json();
-    const { target_type, target_id, text, parent_id, participant_id } = body;
+    const { target_type, target_id, text, parent_id } = body;
+    // NOTE: a legacy `participant_id` field is accepted but ignored for
+    // identity — the signed-in session is the only identity source.
 
-    if (participant_id) {
-      const userLimit = rateLimitMiddleware(ipKey(participant_id, 'comment_user'), RATE_LIMITS.COMMENT_CREATE);
-      if (userLimit.blocked) {
-        return NextResponse.json({ error: userLimit.response.error, retryAfter: userLimit.retryAfterSeconds }, { status: 429 });
-      }
+    // Comments require a signed-in user: the database boundary enforces
+    // auth.uid() = user_id on insert, so anonymous writes can never
+    // succeed. Fail with an honest 401 instead of an RLS-driven 500.
+    const session = await getRequestContext(req);
+    if (!session?.client || !session?.userId) {
+      return NextResponse.json({ error: 'Sign in to comment.' }, { status: 401 });
+    }
+    const sessionUserId = session.userId;
+
+    const userLimit = rateLimitMiddleware(ipKey(sessionUserId, 'comment_user'), RATE_LIMITS.COMMENT_CREATE);
+    if (userLimit.blocked) {
+      return NextResponse.json({ error: userLimit.response.error, retryAfter: userLimit.retryAfterSeconds }, { status: 429 });
     }
 
     // Validate required fields
-    if (!target_type || !target_id || !text || !participant_id) {
+    if (!target_type || !target_id || !text) {
       return NextResponse.json(
-        { error: 'Missing required fields: target_type, target_id, text, participant_id' },
+        { error: 'Missing required fields: target_type, target_id, text' },
         { status: 400 }
       );
     }
@@ -211,28 +222,24 @@ async function postHandler(req) {
       return NextResponse.json({ error: 'Comment must be 500 characters or less' }, { status: 400 });
     }
 
-    // Validate participant_id
-    if (typeof participant_id !== 'string' || participant_id.length < 10) {
-      return NextResponse.json({ error: 'Invalid participant_id' }, { status: 400 });
-    }
-
-    // If replying, verify parent comment exists
+    // If replying, verify the parent exists AND belongs to the same
+    // thread (prevents grafting a reply across unrelated threads).
     if (parent_id) {
       const { data: parent } = await supabase
         .from('comments')
-        .select('id')
+        .select('id, target_type, target_id')
         .eq('id', parent_id)
         .single();
 
       if (!parent) {
         return NextResponse.json({ error: 'Parent comment not found' }, { status: 404 });
       }
+      if (parent.target_type !== target_type || String(parent.target_id) !== String(target_id)) {
+        return NextResponse.json({ error: 'Reply target does not match the parent comment.' }, { status: 400 });
+      }
     }
 
-    // Get authenticated user (optional)
-    const { data: { user } } = await supabase.auth.getUser();
-    const session = await getRequestContext(req);
-    const sessionUserId = session?.userId || user?.id || null;
+    // The session is the authenticated user (resolved above).
 
     // Interaction gating: private/restricted posts stay private.
     // Comments off → only the owner may still comment (owner bypass).
@@ -249,8 +256,8 @@ async function postHandler(req) {
 
     // ── Safety pipeline (Master Prompt 11) ─────────────────────
     // 1) Account restriction check (server-side; a hidden button is not
-    //    enforcement). Applies to signed-in commenters.
-    if (session?.client && sessionUserId) {
+    //    enforcement).
+    {
       const allowed = await canUserPerform(session.client, 'comment');
       if (!allowed) {
         return NextResponse.json(
@@ -270,10 +277,9 @@ async function postHandler(req) {
       );
     }
 
-    // Create comment. When a real session exists we write through the SSR
-    // client so RLS (auth.uid() = user_id) accepts the row; anonymous legacy
-    // paths keep the previous behavior unchanged.
-    const writeClient = session?.client || supabase;
+    // Create comment through the session client so RLS
+    // (auth.uid() = user_id) accepts the row.
+    const writeClient = session.client;
     const { data: comment, error } = await writeClient
       .from('comments')
       .insert({
@@ -346,8 +352,7 @@ async function postHandler(req) {
 
     // Engagement notifications: reply → parent author, top-level comment →
     // content author, @mentions → mentioned users. Fire-and-forget: a
-    // notification failure must never fail the comment itself. Anonymous
-    // comments carry no verifiable identity and never notify.
+    // notification failure must never fail the comment itself.
     if (sessionUserId) {
       (async () => {
         try {
@@ -364,28 +369,16 @@ async function postHandler(req) {
       })();
     }
 
-    // Award reputation for comment creation (non-critical)
-    if (user?.id) {
-      try {
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: user.id,
-            event_type: 'comment_created',
-            source_type: 'comment',
-            source_id: comment.id,
-          }),
-        });
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: user.id,
-            event_type: 'check_badges',
-          }),
-        });
-      } catch (e) {}
+    // Award reputation for comment creation (non-critical). Direct service
+    // call with the server-resolved session user — never HTTP with a
+    // client-supplied id.
+    if (sessionUserId) {
+      (async () => {
+        try {
+          const { awardRep } = await import('@/lib/reputation/awardService');
+          await awardRep({ userId: sessionUserId, eventType: 'comment_created', sourceType: 'comment', sourceId: comment.id });
+        } catch {}
+      })();
     }
 
     // Update comment count on the target

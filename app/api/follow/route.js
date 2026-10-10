@@ -22,7 +22,8 @@ import { notifyNewFollower } from '@/lib/notifications';
  * 
  * Query params:
  *   - user_id: string (required) - target user
- *   - viewer_id: string (optional) - to check if viewer follows target
+ *   NOTE: a legacy `viewer_id` param is intentionally ignored — the
+ *   isFollowing check uses only the signed-in session viewer.
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
@@ -47,11 +48,19 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('user_id');
-    const viewerId = searchParams.get('viewer_id');
 
     if (!userId) {
       return NextResponse.json({ error: 'Missing user_id' }, { status: 400 });
     }
+
+    // Viewer identity comes ONLY from the session. A client-supplied
+    // viewer_id is never trusted for the isFollowing check (prevents
+    // follow-graph oracle queries for arbitrary viewer→target pairs).
+    let viewerId = null;
+    try {
+      const session = await getRequestContext(req);
+      if (session?.userId) viewerId = session.userId;
+    } catch {}
 
     // Get follower and following counts
     const [followersResult, followingResult] = await Promise.all([
@@ -233,19 +242,16 @@ export async function POST(req) {
           }).catch(() => {});
 
           // Universal XP: the follower connected (+2), the followed user
-          // gained a follower (+5). Fire-and-forget; the award route
-          // enforces daily caps and idempotency.
-          const base = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-          fetch(`${base}/api/reputation/award`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: viewer_id, event_type: 'follow', source_type: 'user', source_id: target_user_id }),
-          }).catch(() => {});
-          fetch(`${base}/api/reputation/award`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: target_user_id, event_type: 'follow_received', source_type: 'user', source_id: viewer_id }),
-          }).catch(() => {});
+          // gained a follower (+5). Direct service calls with server-
+          // resolved ids — never client-supplied. Fire-and-forget; the
+          // service enforces daily caps and idempotency.
+          (async () => {
+            try {
+              const { awardRep } = await import('@/lib/reputation/awardService');
+              await awardRep({ userId: viewer_id, eventType: 'follow', sourceType: 'user', sourceId: target_user_id });
+              await awardRep({ userId: target_user_id, eventType: 'follow_received', sourceType: 'user', sourceId: viewer_id });
+            } catch {}
+          })();
         }
       }
     } catch {}

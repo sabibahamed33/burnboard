@@ -31,6 +31,7 @@ export async function GET(req, { params }) {
     const limit = Math.min(parseInt(searchParams.get('limit') || '10', 10), 30);
     const cursor = searchParams.get('cursor');
 
+    // Moderated content never surfaces in public reads.
     let query = supabase
       .from('comments')
       .select(`
@@ -38,6 +39,7 @@ export async function GET(req, { params }) {
         user_profiles!comments_user_id_fkey(username, display_name, avatar_url)
       `)
       .eq('parent_id', id)
+      .eq('moderation_state', 'visible')
       .order('created_at', { ascending: true })
       .limit(limit + 1);
 
@@ -49,7 +51,8 @@ export async function GET(req, { params }) {
 
     if (error) {
       console.error('[Replies] GET Error:', error);
-      return NextResponse.json({ replies: [], hasMore: false, error: error.message });
+      // Never leak database internals to the client.
+      return NextResponse.json({ replies: [], hasMore: false, error: 'Unable to load replies right now.' });
     }
 
     const hasMore = replies.length > limit;

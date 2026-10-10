@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "typecheck:ci": "tsc --noEmit -p tsconfig.ci.json",
+    "security-tests": "node scripts/security-tests.mjs",
+    "dependency-audit": "node scripts/dependency-audit.js",
     "loadtest": "node scripts/load-test/loadtest.js"
   },
   "dependencies": {
@@ -19,7 +22,7 @@
     "html-to-image": "^1.11.13",
     "lucide-react": "^0.460.0",
     "motion": "^11.15.0",
-    "next": "14.2.5",
+    "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "resend": "^4.0.0",

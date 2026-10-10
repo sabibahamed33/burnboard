@@ -37,15 +37,18 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const username = searchParams.get('username');
     const userId = searchParams.get('user_id');
-    const viewerIdParam = searchParams.get('viewer_id');
+    // NOTE: a legacy `viewer_id` query param is intentionally ignored —
+    // viewer identity comes only from the session (see below).
 
     if (!username && !userId) {
       return NextResponse.json({ error: 'Missing username or user_id' }, { status: 400 });
     }
 
-    // Authoritative viewer: the signed-in session wins over any
-    // client-supplied viewer_id (prevents follow/owner spoofing).
-    let viewerId = viewerIdParam || null;
+    // Authoritative viewer: the signed-in session is the ONLY source of
+    // viewer identity. A client-supplied viewer_id is never trusted — with
+    // no session the request is anonymous (prevents isOwnProfile spoofing
+    // that would bypass banned/blocked profile protections).
+    let viewerId = null;
     let sessionClient = null;
     try {
       const session = await getRequestContext(req);
@@ -255,7 +258,17 @@ export async function POST(req) {
     }
 
     if (avatar_url !== undefined) {
-      updates.avatar_url = avatar_url || null;
+      // Avatar URLs are rendered as images — accept https only, bounded
+      // length (same discipline as website_url; javascript:/data: rejected).
+      if (avatar_url) {
+        const v = String(avatar_url).trim();
+        if (v.length > 2000 || !/^https:\/\/[^\s]+$/i.test(v)) {
+          return NextResponse.json({ error: 'Avatar must be a valid https URL (max 2000 characters)' }, { status: 400 });
+        }
+        updates.avatar_url = v;
+      } else {
+        updates.avatar_url = null;
+      }
     }
 
     // Website (link-in-bio) — only http(s) links are stored and displayed.

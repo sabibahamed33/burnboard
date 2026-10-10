@@ -173,18 +173,10 @@ export async function POST(req, { params }) {
       // Notification hook for community owners
       await notifyCommunityJoined(id, userId);
 
-      // Non-critical rep + analytics hooks
+      // Non-critical rep + analytics hooks (direct service call, session user)
       try {
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reputation/award`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: userId,
-            event_type: 'community_joined',
-            source_type: 'community',
-            source_id: id,
-          }),
-        });
+        const { awardRep } = await import('@/lib/reputation/awardService');
+        await awardRep({ userId, eventType: 'community_joined', sourceType: 'community', sourceId: id });
       } catch (e) {}
       try {
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/growth/events`, {

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "middleware.ts",
+    "lib/**/*",
+    "app/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "supabase",
+    "src"
+  ]
+}
