@@ -42,6 +42,9 @@ export default function WelcomeFlow({ next = '/', here = '/welcome' }) {
   // Client-side session check backs the server guard: signed-out visitors
   // bounce to /auth with this flow remembered (no protected content —
   // every step here is generic copy plus the visitor's own empty form).
+  // Single-shot: a ref prevents StrictMode double-mounts from issuing the
+  // redirect twice.
+  const bouncedRef = React.useRef(false);
   useEffect(() => {
     try {
       const saved = parseInt(sessionStorage.getItem(STEP_KEY) || '0', 10);
@@ -52,7 +55,8 @@ export default function WelcomeFlow({ next = '/', here = '/welcome' }) {
     if (!isSupabaseConfigured || !supabase) return;
     let cancelled = false;
     supabase.auth.getSession().then(({ data }) => {
-      if (!cancelled && !data?.session) {
+      if (!cancelled && !data?.session && !bouncedRef.current) {
+        bouncedRef.current = true;
         router.replace(`/auth?next=${encodeURIComponent(here)}`);
       }
     }).catch(() => {});

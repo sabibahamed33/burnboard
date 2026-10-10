@@ -218,16 +218,21 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    // ROOT CAUSE FIX: the previous code created an anonymous client and
+    // called auth.getUser() with no JWT, so this endpoint ALWAYS returned
+    // 401 for real signed-in users (WelcomeFlow identity save could never
+    // succeed). Resolve the user from the request cookies instead.
+    const { client: sessionClient, userId } = await getRequestContext(req);
+    if (!sessionClient || !userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const supabase = getSupabase();
     if (!supabase) {
       return NextResponse.json({ error: 'Service not configured' }, { status: 503 });
     }
 
-    // Get authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const user = { id: userId };
 
     const body = await req.json();
     const { display_name, bio, avatar_url, username, website_url, location } = body;
@@ -292,7 +297,7 @@ export async function POST(req) {
       }
 
       // Check uniqueness
-      const { data: existing } = await supabase
+      const { data: existing } = await sessionClient
         .from('user_profiles')
         .select('id')
         .eq('username', cleanUsername)
@@ -311,7 +316,7 @@ export async function POST(req) {
     }
 
     // Update profile
-    const { data: updated, error: updateError } = await supabase
+    const { data: updated, error: updateError } = await sessionClient
       .from('user_profiles')
       .update(updates)
       .eq('id', user.id)

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Flame, Mail, Lock, User, Eye, EyeOff, ArrowRight, Loader2, Check, AlertTriangle } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { safeInternalPath } from '@/lib/growth/referral';
@@ -39,6 +39,37 @@ export default function AuthPage() {
   const [verifyPending, setVerifyPending] = useState('');
   // Password-reset confirmation state (forgot mode).
   const [resetSent, setResetSent] = useState('');
+  // Deterministic post-success navigation: navigate EXACTLY once.
+  // Without this, StrictMode double-effects + auth state callbacks could
+  // assign window.location.href repeatedly (visible refresh loop).
+  const navigatedRef = useRef(false);
+  const timersRef = useRef([]);
+
+  const navigateOnce = useCallback((url) => {
+    if (navigatedRef.current) return;
+    navigatedRef.current = true;
+    window.location.href = url;
+  }, []);
+
+  // Set once an auth flow has SUCCEEDED and navigation is scheduled.
+  // The submit button stays disabled from here until the page unloads, so
+  // a double-click in the success beat can never create a duplicate
+  // account/profile or overwrite the scheduled single navigation.
+  const doneRef = useRef(false);
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach((t) => clearTimeout(t));
+    };
+  }, []);
+
+  // Switching tabs/modes re-arms the form (clears a stale success lock).
+  // navigatedRef is intentionally NOT reset here: once a post-success
+  // navigation is scheduled it must fire exactly once.
+  useEffect(() => {
+    doneRef.current = false;
+  }, [mode]);
 
   const passwordStrength = getPasswordStrength(password);
 
@@ -97,6 +128,8 @@ export default function AuthPage() {
   // Returning users are redirected home; new visitors keep their destination.
   // Expired/invalid verification links surface a recovery message instead
   // of failing silently.
+  // Guarded: runs once, cancelled on unmount, navigates at most once — so
+  // this check can never drive a redirect loop by itself.
   useEffect(() => {
     if (getCallbackError() === 'auth_callback_failed') {
       setCallbackError(
@@ -105,12 +138,13 @@ export default function AuthPage() {
       track('auth_callback_failed_shown', {});
     }
     if (isSupabaseConfigured && supabase) {
+      let cancelled = false;
       supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session) {
-          fireAttribution({ next: null, ref: getRefCode(), isSignup: false });
-          window.location.href = getNextPath() || '/';
-        }
-      });
+        if (cancelled || !session || navigatedRef.current) return;
+        fireAttribution({ next: null, ref: getRefCode(), isSignup: false });
+        navigateOnce(getNextPath() || '/');
+      }).catch(() => {});
+      return () => { cancelled = true; };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -152,7 +186,7 @@ export default function AuthPage() {
     e.preventDefault();
     setError('');
     setSuccess('');
-    if (loading) return; // duplicate-submission guard
+    if (loading || doneRef.current) return; // duplicate-submission guard
     setLoading(true);
 
     try {
@@ -249,13 +283,13 @@ export default function AuthPage() {
             setLoading(false);
             return;
           }
-          const { error: profileError } = await supabase.from('user_profiles').insert({
+          const { error: profileError } = await supabase.from('user_profiles').upsert({
             id: data.user.id,
             username: username.trim(),
             display_name: displayName.trim() || username.trim(),
             karma: 0,
             level: 'Newbie',
-          });
+          }, { onConflict: 'id', ignoreDuplicates: true });
           if (profileError) {
             // Repeated callbacks/inserts race on the same id: the profile
             // already exists, safe to continue silently. A username conflict
@@ -272,9 +306,15 @@ export default function AuthPage() {
           setSuccess('Account created! Setting things up...');
           // New accounts go through the short welcome flow first; the
           // original destination is preserved through it.
-          setTimeout(() => {
-            window.location.href = `/welcome?next=${encodeURIComponent(next || '/')}`;
-          }, 1200);
+          // Single intentional navigation (navigateOnce guard) after a
+          // short beat so the success state is perceivable. The session
+          // cookie sync from @supabase/ssr + middleware means the /welcome
+          // server guard now sees this session (previously it bounced back
+          // to /auth in a loop).
+          doneRef.current = true;
+          timersRef.current.push(setTimeout(() => {
+            navigateOnce(`/welcome?next=${encodeURIComponent(next || '/')}`);
+          }, 1200));
         }
       } else {
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
@@ -285,13 +325,16 @@ export default function AuthPage() {
           fireAttribution({ next, ref, isSignup: false });
           if (signInData?.user) trackGrowthEvent('login_completed');
           setSuccess('Welcome back! Redirecting...');
-          setTimeout(() => { window.location.href = next || '/'; }, 1000);
+          doneRef.current = true;
+          timersRef.current.push(setTimeout(() => { navigateOnce(next || '/'); }, 1000));
         }
       }
     } catch (err) {
       setError(friendlyAuthError(err, 'Authentication failed'));
     } finally {
-      setLoading(false);
+      // On success the button stays in its loading state until navigation
+      // (doneRef) — no double-submit window during the success beat.
+      if (!doneRef.current) setLoading(false);
     }
   };
 
@@ -389,7 +432,7 @@ export default function AuthPage() {
                       trackGrowthEvent('verification_completed');
                       const next = getNextPath();
                       fireAttribution({ next, ref: getRefCode(), isSignup: true });
-                      window.location.href = `/welcome?next=${encodeURIComponent(next || '/')}`;
+                      navigateOnce(`/welcome?next=${encodeURIComponent(next || '/')}`);
                     } else {
                       setError('Not verified yet — open the confirmation link first, then try again.');
                     }

@@ -1,3 +1,4 @@
+import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
@@ -10,7 +11,55 @@ export async function middleware(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.set('x-request-id', requestId);
 
+  // ── Supabase session refresh (ROOT CAUSE FIX) ────────────────
+  // The browser client (@supabase/ssr) stores the session in cookies, but
+  // those cookies must be refreshed on the server on every request —
+  // otherwise the /welcome server guard reads a stale/empty session and
+  // bounces an actually-signed-in user back to /auth in a loop.
+  // This follows the official @supabase/ssr middleware pattern: create a
+  // server client bound to this request, call getUser() (refreshes +
+  // re-sets cookies when needed), and return the response that carries
+  // any updated cookies.
   let response = NextResponse.next({ request: { headers } });
+
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+  const supabaseKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    '';
+
+  if (supabaseUrl && supabaseKey) {
+    const supabase = createServerClient(supabaseUrl, supabaseKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          // Update the request (for downstream server components/routes)
+          // and the outgoing response (so the browser stores the refresh).
+          cookiesToSet.forEach(({ name, value, options }) => {
+            try {
+              request.cookies.set(name, value);
+            } catch {}
+          });
+          cookiesToSet.forEach(({ name, value, options }) => {
+            try {
+              response.cookies.set(name, value, options);
+            } catch {}
+          });
+        },
+      },
+    });
+    try {
+      // getUser() validates + refreshes the session; never throws the
+      // middleware — auth failures simply leave an anonymous request.
+      await supabase.auth.getUser();
+    } catch {
+      // Fail-open: anonymous request continues with security headers.
+    }
+  }
 
   // ── Security headers (hardening, MP21) ───────────────────
   // Clickjacking / MIME-sniffing / referrer-leak protections on every
@@ -48,6 +97,12 @@ export async function middleware(request: NextRequest) {
         rewrite.headers.set(key, value);
       }
       rewrite.headers.set('x-request-id', requestId);
+      // Preserve any refreshed Supabase auth cookies on the rewrite path.
+      try {
+        for (const c of response.cookies.getAll()) {
+          rewrite.cookies.set(c.name, c.value, c);
+        }
+      } catch {}
       return rewrite;
     }
   }
