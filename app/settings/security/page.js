@@ -84,10 +84,18 @@ export default function SecurityCenterPage() {
   };
 
   const signOut = async () => {
+    if (signingOut) return; // duplicate-submission guard
     setSigningOut(true);
     try {
       await supabase.auth.signOut();
     } catch {} finally {
+      // Complete session cleanup so account switching never leaks stale
+      // state: drop in-memory/session welcome progress and per-session
+      // feed impression keys. Persistent per-account data (interests,
+      // follows) lives server-side and is re-fetched on next sign-in.
+      try {
+        sessionStorage.removeItem('burnboard_welcome_step');
+      } catch {}
       try {
         window.location.href = '/';
       } catch {}

@@ -163,7 +163,7 @@ export default function AuthPage() {
           .from('user_profiles')
           .select('id')
           .eq('username', trimmed)
-          .single();
+          .maybeSingle();
         if (data) {
           setUsernameStatus('taken');
           const num = Math.floor(Math.random() * 900) + 100;

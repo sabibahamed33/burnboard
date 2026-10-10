@@ -3,6 +3,8 @@
 import React from 'react';
 import { Flame, RefreshCw } from 'lucide-react';
 
+import { reportClientError } from '@/lib/clientErrors';
+
 export default function Error({ error, reset }) {
   // Raw error text (provider messages, DB errors, stack traces) stays in
   // the console for diagnostics — users only ever see the safe copy below.
@@ -10,6 +12,12 @@ export default function Error({ error, reset }) {
     try {
       console.error('[RouteError]', error?.message || error);
     } catch {}
+    reportClientError({
+      kind: 'route_error_boundary',
+      message: error?.message || 'Route error',
+      stack: error?.stack,
+      operation: 'app/error.js',
+    });
   }, [error]);
 
   return (

@@ -70,6 +70,18 @@ const fetchRisingUsers = async () => {
   return res.json();
 };
 
+const fetchRisingPosts = async () => {
+  const res = await fetch('/api/feed?tab=rising&limit=8');
+  if (!res.ok) throw new Error('Failed to fetch rising');
+  return res.json();
+};
+
+const fetchLatestPosts = async () => {
+  const res = await fetch('/api/feed?tab=latest&limit=8');
+  if (!res.ok) throw new Error('Failed to fetch latest');
+  return res.json();
+};
+
 const fetchTopics = async () => {
   const res = await fetch('/api/search?scope=topics&limit=12');
   if (!res.ok) throw new Error('Failed to fetch topics');
@@ -87,7 +99,8 @@ const WINDOWS = [
 const SECTIONS = [
   { key: 'foryou', label: 'For You', icon: Sparkles },
   { key: 'trending', label: 'Trending', icon: TrendingUp },
-  { key: 'fresh', label: 'Fresh', icon: Clock },
+  { key: 'rising', label: 'Rising', icon: Zap },
+  { key: 'latest', label: 'Latest', icon: Clock },
   { key: 'users', label: 'Users', icon: Users },
   { key: 'topics', label: 'Topics', icon: Compass },
   { key: 'hashtags', label: 'Hashtags', icon: Hash },
@@ -536,6 +549,20 @@ export default function ExplorePage() {
     { revalidateOnFocus: false, refreshInterval: 60000 }
   );
 
+  // Rising posts: velocity-ranked newer content (server-authoritative).
+  const { data: risingData } = useSWR(
+    ['explore-rising-posts', retryTick],
+    fetchRisingPosts,
+    { revalidateOnFocus: false, refreshInterval: 60000 }
+  );
+
+  // Latest: pure-recency eligible public content (server-authoritative).
+  const { data: latestData } = useSWR(
+    ['explore-latest-posts', retryTick],
+    fetchLatestPosts,
+    { revalidateOnFocus: false, refreshInterval: 60000 }
+  );
+
   const { data: topicsData } = useSWR(
     ['explore-topics', retryTick],
     fetchTopics,
@@ -572,20 +599,16 @@ export default function ExplorePage() {
   const battles = data?.battles || [];
   const forYouItems = feedData?.items || [];
   const risingUsers = usersData?.items || [];
+  const risingItems = risingData?.items || [];
+  const latestItems = latestData?.items || [];
   const topics = topicsData?.topics || [];
   const communities = communityData?.communities || [];
   const challenges = challengeData?.challenges || [];
 
-  // Fresh: genuinely recent public content (recency-first from live data).
-  const freshItems = useMemo(() => {
-    const mixed = [
-      ...hotSeats.map((s) => ({ kind: 'seat', at: s.created_at, data: s })),
-      ...roasts.map((r) => ({ kind: 'roast', at: r.created_at, data: r })),
-    ];
-    return mixed
-      .sort((a, b) => new Date(b.at) - new Date(a.at))
-      .slice(0, 8);
-  }, [hotSeats, roasts]);
+  // Latest grid source: server-authoritative pure-recency feed
+  // (eligible public content only). `freshItems` kept as an alias so any
+  // external deep-link using the old section key still resolves.
+  const freshItems = useMemo(() => latestItems.slice(0, 8), [latestItems]);
 
   // Editorial mix for the Trending Now carousel (ranked order preserved).
   const trendingCards = useMemo(() => {
@@ -637,7 +660,8 @@ export default function ExplorePage() {
   const hasAnything =
     hotSeats.length > 0 || roasts.length > 0 || battles.length > 0 ||
     forYouItems.length > 0 || risingUsers.length > 0 || topics.length > 0 ||
-    trendingTags.length > 0 || communities.length > 0 || challenges.length > 0;
+    trendingTags.length > 0 || communities.length > 0 || challenges.length > 0 ||
+    risingItems.length > 0 || latestItems.length > 0;
   const isEmpty = !isLoading && !hasAnything;
 
   // Discovery analytics (existing funnel event — no new taxonomy).
@@ -871,15 +895,25 @@ export default function ExplorePage() {
                 </section>
               )}
 
+              {/* Rising: newer content gaining traction fast (velocity-ranked) */}
+              {showSection('rising') && risingItems.length > 0 && (
+                <section className="space-y-3" aria-label="Rising">
+                  <SectionHeader emoji="⚡" title="Rising" href="/home" hrefLabel="Open Feed" />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {risingItems.slice(0, 4).map((item) => (
+                      <FeedPreviewCard key={`rising-${item.type}-${item.id}`} item={item} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {/* Fresh */}
-              {showSection('fresh') && freshItems.length > 0 && (
-                <section className="space-y-3" aria-label="Fresh">
-                  <SectionHeader emoji="🆕" title="Fresh" />
-                  <div className="space-y-3">
-                    {freshItems.map((entry) => (
-                      entry.kind === 'seat'
-                        ? <HotSeatCard key={`fresh-seat-${entry.data.id}`} seat={entry.data} />
-                        : <RoastItem key={`fresh-roast-${entry.data.id}`} roast={entry.data} />
+              {showSection('latest') && latestItems.length > 0 && (
+                <section className="space-y-3" aria-label="Latest">
+                  <SectionHeader emoji="🆕" title="Latest" />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {latestItems.slice(0, 4).map((item) => (
+                      <FeedPreviewCard key={`latest-${item.type}-${item.id}`} item={item} />
                     ))}
                   </div>
                 </section>

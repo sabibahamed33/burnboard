@@ -14,20 +14,32 @@ import { recordSignal } from '@/lib/reco/signals';
  * Social feed endpoint with multi-content support, ranking, and pagination.
  *
  * Query params:
- *   - tab:      'following' | 'for_you' | 'trending' (default: 'for_you')
- *   - cursor:   Following/Trending → ISO timestamp for cursor pagination.
+ *   - tab:      'following' | 'for_you' | 'trending' | 'rising' | 'latest'
+ *               (default: 'for_you')
+ *   - cursor:   Following/Trending/Rising/Latest → ISO timestamp cursor.
  *               For You (personalized) → numeric page offset (opaque).
  *   - limit:    number (default: 20, max: 50)
  *   - window:   'now' | 'today' | 'week' | 'alltime' (trending tab only)
  *
- * Feed semantics:
+ * Feed semantics (documented ranking windows, dedup, fallbacks):
  *   - following: chronological content from people the user chose to follow.
  *     Distinct from algorithmic recommendations — user intent stays clear.
  *   - for_you:   personalized ranking (affinity, diversity, exploration,
  *                negative feedback, safety filters) when signed in with
  *                personalization enabled. Anonymous/signed-out visitors get
  *                the previous generic ranking — never a blank feed.
- *   - trending:  unchanged engagement/recency ranking.
+ *   - trending:  sustained high engagement + time decay (lifetime winners
+ *                allowed). Window controls the recency horizon.
+ *   - rising:    NEWER or less-established content gaining traction fast:
+ *                velocity = engagement / (ageHours + 2)^1.2, age capped at
+ *                72h, engagement must be > 0. Old posts can never top this
+ *                even with huge lifetime totals (velocity collapses with age).
+ *                Falls back to trending order when no velocity signal exists.
+ *   - latest:    pure recency — eligible public content ordered by
+ *                publication time only (no scoring). Never labeled trending.
+ *   Dedup: rows are keyed `${type}:${id}` client-side (mergeFeedItems) and
+ *   the server pages over the chronological frontier so ranked display order
+ *   can never skip or repeat rows between pages.
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
@@ -76,6 +88,134 @@ function calculateTrendingScore(item, now, window) {
   return engagement * timeDecay + timeDecay * 50;
 }
 
+function engagementOfRow(item) {
+  return (
+    (item.reaction_haha || 0) * 3 +
+    (item.reaction_brutal || 0) * 2 +
+    (item.reaction_cry || 0) * 4 +
+    (item.upvotes || 0) * 1 +
+    (item.upvote_count || 0) * 1 +
+    (item.comment_count || 0) * 2
+  );
+}
+
+function risingVelocity(engagement, ageHours) {
+  // Age-adjusted velocity: young posts with real engagement outrank old
+  // posts with large lifetime totals. Exponent > 1 punishes age harder.
+  return engagement / Math.pow(ageHours + 2, 1.2);
+}
+
+/**
+ * Latest feed: eligible public content ordered by publication time only.
+ * Safety allowlist mirrors buildGenericFeed (public posts; non-hidden
+ * roasts). Cursor pages over created_at. No scoring, no labels.
+ */
+async function buildLatestFeed(supabase, { cursor, limit }) {
+  let roastQuery = supabase
+    .from('roasts')
+    .select('*, profiles!inner(id, username, platform, avatar_letter, avatar_color, tagline, bio)')
+    .eq('is_hidden', false)
+    .order('created_at', { ascending: false })
+    .limit(limit + 1);
+
+  let postQuery = supabase
+    .from('social_posts')
+    .select('*, user_profiles!inner(id, username, display_name, bio), polls(*)')
+    .eq('visibility', 'public')
+    .order('created_at', { ascending: false })
+    .limit(limit + 1);
+
+  if (cursor) {
+    roastQuery = roastQuery.lt('created_at', cursor);
+    postQuery = postQuery.lt('created_at', cursor);
+  }
+
+  const [roastResult, postResult] = await Promise.all([roastQuery, postQuery]);
+  const roasts = roastResult.data || [];
+  const posts = postResult.data || [];
+
+  const transformed = [];
+  for (const r of roasts) transformed.push(transformRoastItem(r));
+  for (const p of posts) transformed.push(transformSocialPostItem(p));
+  transformed.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const hasMore = roasts.length > limit || posts.length > limit || transformed.length > limit;
+  const page = transformed.slice(0, limit);
+  const times = page.map((i) => i.createdAt).filter(Boolean).sort((a, b) => new Date(b) - new Date(a));
+  const nextCursor = hasMore && times.length > 0 ? times[times.length - 1] : null;
+  await attachTaggedUsers(supabase, page);
+  return { feedItems: page, nextCursor };
+}
+
+/**
+ * Rising feed: newer/less-established content gaining traction.
+ * Candidate window: last 72h, engagement > 0. Ranked by age-adjusted
+ * velocity (NOT raw totals). Falls back to trending score order when no
+ * velocity signal exists (quiet corpus) so the tab never dead-ends.
+ */
+async function buildRisingFeed(supabase, { cursor, limit, now }) {
+  const since = new Date(now - 72 * 60 * 60 * 1000).toISOString();
+  let roastQuery = supabase
+    .from('roasts')
+    .select('*, profiles!inner(id, username, platform, avatar_letter, avatar_color, tagline, bio)')
+    .eq('is_hidden', false)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(limit * 4 + 10);
+
+  let postQuery = supabase
+    .from('social_posts')
+    .select('*, user_profiles!inner(id, username, display_name, bio), polls(*)')
+    .eq('visibility', 'public')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(limit * 4 + 10);
+
+  if (cursor) {
+    roastQuery = roastQuery.lt('created_at', cursor);
+    postQuery = postQuery.lt('created_at', cursor);
+  }
+
+  const [roastResult, postResult] = await Promise.all([roastQuery, postQuery]);
+  const roasts = roastResult.data || [];
+  const posts = postResult.data || [];
+
+  const scored = [];
+  for (const r of [...roasts, ...posts]) {
+    const createdAt = new Date(r.created_at).getTime();
+    const ageHours = Math.max(0.1, (now - createdAt) / (1000 * 60 * 60));
+    const eng = engagementOfRow(r);
+    if (eng <= 0) continue; // rising requires real traction
+    scored.push({ row: r, velocity: risingVelocity(eng, ageHours), eng, ageHours });
+  }
+  scored.sort((a, b) => b.velocity - a.velocity);
+
+  // Fallback: quiet corpus (no engagement yet) → trending-score order over
+  // the same recency window so the tab explains itself honestly.
+  const rows = scored.length > 0
+    ? scored.slice(0, limit).map((s) => s.row)
+    : [...roasts, ...posts]
+        .map((r) => ({ row: r, score: calculateTrendingScore(r, now, 'today') }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map((s) => s.row);
+
+  const transformed = [];
+  const roastIds = new Set(roasts.map((r) => r.id));
+  for (const r of rows) {
+    transformed.push(roastIds.has(r.id) ? transformRoastItem(r) : transformSocialPostItem(r));
+  }
+
+  const times = [...roasts.map((r) => r.created_at), ...posts.map((p) => p.created_at)]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+  const hasMore = roasts.length >= limit * 2 || posts.length >= limit * 2;
+  const nextCursor = hasMore && times.length > 0
+    ? times[Math.min(limit - 1, times.length - 1)]
+    : null;
+  await attachTaggedUsers(supabase, transformed);
+  return { feedItems: transformed.slice(0, limit), nextCursor, fallback: scored.length === 0 };
+}
 /**
  * Generic ranked feed (previous "for_you" behavior) — used when the viewer
  * is signed out or has personalization disabled. No behavior profiling.
@@ -162,7 +302,7 @@ async function getHandler(req) {
     const window = searchParams.get('window') || 'today';
     const now = Date.now();
 
-    // Timestamp cursors (Following/Trending) must look like ISO dates;
+    // Timestamp cursors (Following/Trending/Rising/Latest) must look like ISO dates;
     // For You personalized cursors are numeric offsets — never mix them.
     const tsCursor = cursor && /^\d{4}-\d{2}/.test(cursor) ? cursor : null;
 
@@ -208,6 +348,22 @@ async function getHandler(req) {
     if (tab === 'trending') {
       const { feedItems, nextCursor } = await buildGenericFeed(supabase, {
         cursor: tsCursor, limit, window, now,
+      });
+      return NextResponse.json({ items: feedItems, nextCursor, tab, count: feedItems.length });
+    }
+
+    // ── RISING (velocity-ranked, age-adjusted, 72h window) ─────
+    if (tab === 'rising') {
+      const { feedItems, nextCursor, fallback } = await buildRisingFeed(supabase, {
+        cursor: tsCursor, limit, now,
+      });
+      return NextResponse.json({ items: feedItems, nextCursor, tab, count: feedItems.length, fallback: !!fallback });
+    }
+
+    // ── LATEST (pure recency, no scoring) ──────────────────────
+    if (tab === 'latest') {
+      const { feedItems, nextCursor } = await buildLatestFeed(supabase, {
+        cursor: tsCursor, limit,
       });
       return NextResponse.json({ items: feedItems, nextCursor, tab, count: feedItems.length });
     }

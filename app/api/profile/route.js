@@ -302,7 +302,7 @@ export async function POST(req) {
         .select('id')
         .eq('username', cleanUsername)
         .neq('id', user.id)
-        .single();
+        .maybeSingle();
 
       if (existing) {
         return NextResponse.json({ error: 'Username is already taken' }, { status: 400 });
@@ -315,13 +315,34 @@ export async function POST(req) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
 
-    // Update profile
-    const { data: updated, error: updateError } = await sessionClient
+    // Update profile (with insert fallback for email-verified accounts that
+    // reached /welcome without a client signup upsert — e.g. confirmation
+    // flow or raced insert. Never leaves a signed-in user without a row.)
+    let { data: updated, error: updateError } = await sessionClient
       .from('user_profiles')
       .update(updates)
       .eq('id', user.id)
       .select()
       .single();
+
+    if (updateError && updateError.code === 'PGRST116') {
+      const insertRow = {
+        id: user.id,
+        username: updates.username || `user_${user.id.slice(0, 8)}`,
+        display_name: updates.display_name || updates.username || 'New User',
+        ...(updates.bio !== undefined ? { bio: updates.bio } : {}),
+        ...(updates.avatar_url !== undefined ? { avatar_url: updates.avatar_url } : {}),
+        ...(updates.website_url !== undefined ? { website_url: updates.website_url } : {}),
+        ...(updates.location_text !== undefined ? { location_text: updates.location_text } : {}),
+      };
+      const inserted = await sessionClient
+        .from('user_profiles')
+        .insert(insertRow)
+        .select()
+        .single();
+      updated = inserted.data;
+      updateError = inserted.error;
+    }
 
     if (updateError) {
       console.error('[Profile] Update error:', updateError);

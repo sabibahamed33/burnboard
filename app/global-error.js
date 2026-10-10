@@ -2,6 +2,8 @@
 
 import React from 'react';
 
+import { reportClientError } from '@/lib/clientErrors';
+
 /**
  * Global error boundary (last resort). A failure anywhere must never leave
  * a blank screen: reset the boundary or reload, core nav stays reachable.
@@ -11,6 +13,12 @@ export default function GlobalError({ error, reset }) {
     try {
       console.error('[GlobalError]', error?.message || error);
     } catch {}
+    reportClientError({
+      kind: 'global_error_boundary',
+      message: error?.message || 'Global error',
+      stack: error?.stack,
+      operation: 'app/global-error.js',
+    });
   }, [error]);
 
   return (

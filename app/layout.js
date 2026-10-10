@@ -3,6 +3,7 @@ import { Analytics } from '@vercel/analytics/react';
 import LocaleProvider from '@/components/LocaleProvider';
 import SocialShell from '@/components/SocialShell';
 import ReferralLinkProbe from '@/components/growth/ReferralLinkProbe';
+import ErrorReporter from '@/components/ErrorReporter';
 import { ServiceWorkerRegistrar, ConnectionBanner } from '@/components/pwa/ServiceWorker';
 
 export const viewport = {
@@ -128,6 +129,7 @@ export default function RootLayout({ children }) {
         </LocaleProvider>
         <ServiceWorkerRegistrar />
         <ReferralLinkProbe />
+        <ErrorReporter />
         <Analytics />
       </body>
     </html>

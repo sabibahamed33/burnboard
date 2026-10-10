@@ -834,14 +834,34 @@ export default function SocialHomePage() {
                   THE ARENA IS QUIET
                 </h2>
                 <p className="text-xs text-zinc-400 max-w-sm mx-auto">
-                  Be the first to start something. Put yourself or someone else on the Hot Seat.
+                  {activeTab === 'for_you'
+                    ? 'No personalized picks yet — explore what\u2019s live right now, or be the first to start something.'
+                    : 'Be the first to start something. Put yourself or someone else on the Hot Seat.'}
                 </p>
-                <Link
-                  href="/hot-seat"
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-[#ff4d00] text-black font-black text-sm rounded-xl hover:bg-[#ff6622] transition-all shadow-[0_0_25px_rgba(255,77,0,0.3)] uppercase tracking-wider"
-                >
-                  🔥 START THE FIRE
-                </Link>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {activeTab === 'for_you' && (
+                    <>
+                      <Link
+                        href="/explore"
+                        className="inline-flex items-center gap-2 px-5 py-3 bg-[#ff4d00] text-black font-black text-sm rounded-xl hover:bg-[#ff6622] transition-all shadow-[0_0_25px_rgba(255,77,0,0.3)] uppercase tracking-wider"
+                      >
+                        EXPLORE TRENDING
+                      </Link>
+                      <Link
+                        href="/c"
+                        className="inline-flex items-center gap-2 px-5 py-3 border border-[#333] text-zinc-200 font-bold text-sm rounded-xl hover:border-[#ff4d00]/50 transition-all uppercase tracking-wider"
+                      >
+                        COMMUNITIES
+                      </Link>
+                    </>
+                  )}
+                  <Link
+                    href="/hot-seat"
+                    className={`inline-flex items-center gap-2 px-6 py-3 ${activeTab === 'for_you' ? 'border border-[#333] text-zinc-200 font-bold' : 'bg-[#ff4d00] text-black font-black shadow-[0_0_25px_rgba(255,77,0,0.3)]'} text-sm rounded-xl hover:bg-[#ff6622] transition-all uppercase tracking-wider`}
+                  >
+                    🔥 START THE FIRE
+                  </Link>
+                </div>
               </div>
             )
           )}
